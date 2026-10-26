@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#243E6B" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-title" content="YB노트" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="icon" type="image/png" href="icons/icon-192.png" />
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
+  <title>YB-EverNote</title>
+</head>
+<body>
+  <div id="app" class="app" data-view="list">
+    <!-- 1열: 폴더 -->
+    <aside class="pane pane-folders" aria-label="폴더">
+      <header class="pane-head">
+        <span class="brand">YB-EverNote</span>
+      </header>
+      <nav id="folder-nav" class="folder-nav"></nav>
+      <footer class="pane-foot"><span id="version"></span></footer>
+    </aside>
+
+    <!-- 2열: 노트 목록 -->
+    <section class="pane pane-list" aria-label="노트 목록">
+      <header class="pane-head">
+        <button class="icon-btn only-mobile" data-go="folders" aria-label="폴더 보기">☰</button>
+        <h1 id="list-title">모든 노트</h1>
+        <button class="btn-primary" id="btn-new" disabled title="1단계에서 구현">＋ 새 노트</button>
+      </header>
+      <div class="search-box">
+        <input type="search" placeholder="검색 (5단계 구현 예정)" disabled />
+      </div>
+      <ul id="note-list" class="note-list"></ul>
+    </section>
+
+    <!-- 3열: 편집 -->
+    <main class="pane pane-editor" aria-label="노트 편집">
+      <header class="pane-head">
+        <button class="icon-btn only-mobile" data-go="list" aria-label="목록으로">‹</button>
+        <h2 id="editor-title">노트를 선택하세요</h2>
+      </header>
+      <div class="toolbar" aria-label="도구 모음">
+        <span class="tool" title="폰트 변경 · 1단계">가</span>
+        <span class="tool" title="체크박스 · 1단계">☑</span>
+        <span class="tool" title="형광펜 · 1단계">🖍</span>
+        <span class="tool" title="그림 붙여넣기 · 1단계">🖼</span>
+        <span class="sep"></span>
+        <span class="tool" title="필압 펜 · 2단계">✒</span>
+        <span class="tool" title="지우개 · 2단계">⌫</span>
+      </div>
+      <div id="editor-body" class="editor-body">
+        <div class="placeholder">
+          <p class="ph-title">0단계 · 준비 완료</p>
+          <p>화면 골격만 갖춘 상태입니다. 도구 모음은 자리만 잡혀 있으며,<br>텍스트 편집은 1단계, 펜 필기는 2단계에서 동작합니다.</p>
+        </div>
+      </div>
+    </main>
+  </div>
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

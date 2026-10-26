@@ -1,0 +1,16 @@
+{
+  "name": "YB-EverNote",
+  "short_name": "YB노트",
+  "description": "YB 개인 노트",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#16202B",
+  "theme_color": "#243E6B",
+  "lang": "ko",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icons/icon-512-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
