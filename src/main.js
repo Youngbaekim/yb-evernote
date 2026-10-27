@@ -4,7 +4,7 @@ import { signIn, signOutUser, watchAuth, finishRedirect } from './firebase.js';
 import { createEditor, toStorableJSON, hydrateJSON, FONTS, SIZES, HIGHLIGHTS } from './editor.js';
 import { newDrawingAttrs, flushAllDrawings, getDrawingView } from './drawing.js';
 
-const VERSION = 'v0.3.0 · 3단계';
+const VERSION = 'v0.4.1 · 4단계';
 const $ = (sel) => document.querySelector(sel);
 const app = $('#app');
 
@@ -40,6 +40,35 @@ const TAG_RE = /#([\p{L}\p{N}_-]+)/gu;
 const tagsOf = (title) => [...new Set([...(title || '').matchAll(TAG_RE)].map((m) => m[1]))];
 const stripTags = (title) => (title || '').replace(TAG_RE, '').replace(/\s{2,}/g, ' ').trim();
 const titleOf = (n) => stripTags(n.title) || n.preview?.split('\n')[0]?.slice(0, 40) || '제목 없음';
+
+/* ───────── 폴더 트리 ───────── */
+const FOLDER_SVG = `<svg class="f-svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M3 6.5A1.5 1.5 0 014.5 5h4l2 2h9A1.5 1.5 0 0121 8.5v9a1.5 1.5 0 01-1.5 1.5h-15A1.5 1.5 0 013 17.5z"/></svg>`;
+const folderById = (id) => state.folders.find((f) => f.id === id);
+const childrenOf = (pid) => state.folders.filter((f) => (f.parentId ?? null) === (pid ?? null));
+/** 상위→하위 경로 (예: [Words&Thoughts, (필기) 예배]) */
+function folderPath(id) {
+  const path = [];
+  const seen = new Set();
+  let f = folderById(id);
+  while (f && !seen.has(f.id)) { seen.add(f.id); path.unshift(f); f = folderById(f.parentId); }
+  return path;
+}
+/** 트리 순서로 펼친 목록 [{ folder, depth }] */
+function folderTree(pid = null, depth = 0, out = [], seen = new Set()) {
+  for (const f of childrenOf(pid)) {
+    if (seen.has(f.id)) continue;
+    seen.add(f.id);
+    out.push({ folder: f, depth });
+    folderTree(f.id, depth + 1, out, seen);
+  }
+  return out;
+}
+const collapsed = new Set((() => { try { return JSON.parse(localStorage.getItem('yb-collapsed') || '[]'); } catch { return []; } })());
+function toggleCollapse(id) {
+  collapsed.has(id) ? collapsed.delete(id) : collapsed.add(id);
+  try { localStorage.setItem('yb-collapsed', JSON.stringify([...collapsed])); } catch { /* 무시 */ }
+  renderFolders();
+}
 
 /* ───────── 편집기 ───────── */
 let saveTimer = null;
@@ -137,7 +166,7 @@ function filterName() {
   if (state.filter === 'all') return '모든 노트';
   if (state.filter === 'fav') return '즐겨찾기';
   if (state.filter === 'trash') return '휴지통';
-  return state.folders.find((f) => f.id === state.filter)?.name ?? '폴더';
+  return folderPath(state.filter).map((f) => f.name).join(' › ') || '폴더';
 }
 
 function renderFolders() {
@@ -162,7 +191,32 @@ function renderFolders() {
   $('#folder-nav').innerHTML =
     sys.map((f) => item(f, f.icon, count[f.id], false)).join('') +
     `<div class="nav-label"><span>폴더</span><button class="nav-add" id="btn-add-folder" title="새 폴더">＋</button></div>` +
-    state.folders.map((f) => item(f, '▢', live.filter((n) => n.folderId === f.id).length, true)).join('');
+    folderBranch(null, live);
+}
+
+/** 폴더 트리: 하위 폴더는 들여쓰고 왼쪽 세로선·가로선으로 연결 */
+function folderBranch(pid, live, seen = new Set()) {
+  const kids = childrenOf(pid).filter((f) => !seen.has(f.id));
+  if (!kids.length) return '';
+  return kids
+    .map((f) => {
+      seen.add(f.id);
+      const hasKids = childrenOf(f.id).length > 0;
+      const open = !collapsed.has(f.id);
+      const n = live.filter((x) => x.folderId === f.id).length;
+      const sub = hasKids && open ? `<div class="tree-children">${folderBranch(f.id, live, seen)}</div>` : '';
+      return `
+      <div class="tree-node">
+        <div class="folder-row ${state.filter === f.id ? 'active' : ''}">
+          ${hasKids ? `<button class="f-caret ${open ? 'open' : ''}" data-collapse="${f.id}" title="${open ? '접기' : '펼치기'}">▸</button>` : '<span class="f-caret-sp"></span>'}
+          <button class="folder" data-folder="${f.id}">
+            <span class="f-icon">${FOLDER_SVG}</span><span class="f-name">${esc(f.name)}</span><span class="f-count">${n}</span>
+          </button>
+          <button class="f-more" data-folder-menu="${f.id}" title="하위 폴더 추가·이름 변경·삭제">⋯</button>
+        </div>${sub}
+      </div>`;
+    })
+    .join('');
 }
 
 function renderList() {
@@ -170,8 +224,19 @@ function renderList() {
   renderTagSelect();
   $('#btn-new').hidden = state.filter === 'trash';
   const notes = visibleNotes();
+  const live = state.notes.filter((n) => !n.trashedAt);
+  const isFolder = !['all', 'fav', 'trash'].includes(state.filter);
+  const subs = isFolder && !state.search.trim() ? childrenOf(state.filter) : [];
   const empty = state.filter === 'trash' ? '휴지통이 비어 있습니다.' : '노트가 없습니다. ＋ 새 노트를 눌러 시작하세요.';
-  $('#note-list').innerHTML = notes.length
+  const subHtml = subs.length
+    ? `<li class="sub-folders">${subs
+        .map((f) => {
+          const cnt = live.filter((n) => n.folderId === f.id).length + childrenOf(f.id).length;
+          return `<button class="sub-folder" data-folder="${f.id}" title="${esc(f.name)}"><span class="sf-count">${cnt}</span><span class="sf-icon">${FOLDER_SVG}</span><span class="sf-name">${esc(f.name)}</span></button>`;
+        })
+        .join('')}</li>`
+    : '';
+  $('#note-list').innerHTML = subHtml + (notes.length
     ? notes
         .map(
           (n) => `
@@ -179,12 +244,12 @@ function renderList() {
         <button class="note-card ${state.noteId === n.id ? 'active' : ''}" data-note="${n.id}">
           <span class="nc-title">${n.fav ? '<span class="star">★</span> ' : ''}${esc(titleOf(n))}${tagsOf(n.title).map((t) => `<span class="tag-chip" data-tag="${esc(t)}">#${esc(t)}</span>`).join('')}</span>
           <span class="nc-preview">${esc((n.preview || '').replace(/\n+/g, ' ').slice(0, 70))}</span>
-          <span class="nc-meta">${fmtDate(n.updatedAt)}${n.folderId && state.filter === 'all' ? ' · ' + esc(state.folders.find((f) => f.id === n.folderId)?.name ?? '') : ''}</span>
+          <span class="nc-meta">${fmtDate(n.updatedAt)}${n.folderId && state.filter === 'all' ? ' · ' + esc(folderPath(n.folderId).map((f) => f.name).join(' › ')) : ''}</span>
         </button>
       </li>`
         )
         .join('')
-    : `<li class="empty">${empty}</li>`;
+    : subs.length ? '' : `<li class="empty">${empty}</li>`);
   renderFolders();
 }
 
@@ -206,7 +271,7 @@ function renderEditorHeader({ keepTitle = false } = {}) {
   $('#editor').dataset.bg = bg;
   $('#sel-move').innerHTML =
     `<option value="">미분류</option>` +
-    state.folders.map((f) => `<option value="${f.id}">${esc(f.name)}</option>`).join('');
+    folderTree().map(({ folder: f, depth }) => `<option value="${f.id}">${'\u3000'.repeat(depth)}${depth ? '└ ' : ''}${esc(f.name)}</option>`).join('');
   $('#sel-move').value = note?.folderId ?? '';
   $('#toolbar').classList.toggle('disabled', !has || trashed);
   $('#trash-banner')?.remove();
@@ -354,11 +419,13 @@ async function newNote() {
   $('#note-title').focus();
 }
 
-async function addFolder() {
-  const name = prompt('새 폴더 이름')?.trim();
+async function addFolder(parentId = null) {
+  const parent = parentId ? folderById(parentId) : null;
+  const name = prompt(parent ? `'${parent.name}' 안에 만들 폴더 이름` : '새 폴더 이름')?.trim();
   if (!name) return;
   const now = Date.now();
-  const folder = { id: store.newId('fld'), name, order: state.folders.length, createdAt: now, updatedAt: now };
+  const folder = { id: store.newId('fld'), name, parentId: parentId ?? null, order: state.folders.length, createdAt: now, updatedAt: now };
+  if (parentId) collapsed.delete(parentId);
   store.saveFolder(folder);
   state.folders.push(folder);
   state.filter = folder.id;
@@ -366,24 +433,49 @@ async function addFolder() {
   renderEditorHeader();
 }
 
-async function folderMenu(id) {
-  const f = state.folders.find((x) => x.id === id);
+function folderMenu(id, anchor) {
+  const f = folderById(id);
   if (!f) return;
-  const name = prompt(`폴더 이름 변경\n(이름을 모두 지우고 확인하면 폴더를 삭제합니다)`, f.name);
-  if (name === null) return;
-  if (name.trim() === '') {
-    if (!confirm(`'${f.name}' 폴더를 삭제할까요?\n안의 노트는 지워지지 않고 '모든 노트'에 남습니다.`)) return;
-    await flushSave();
-    store.deleteFolder(id, state.notes.filter((n) => n.folderId === id));
-    state.folders = state.folders.filter((x) => x.id !== id);
-    if (state.filter === id) state.filter = 'all';
-  } else {
-    f.name = name.trim();
-    f.updatedAt = Date.now();
-    store.saveFolder(f);
-  }
+  const r = anchor.getBoundingClientRect();
+  const menu = $('#ctx-menu');
+  menu.innerHTML = `
+    <button data-fm="add">＋ 하위 폴더 추가</button>
+    <button data-fm="rename">이름 변경</button>
+    <button data-fm="delete" class="danger">폴더 삭제</button>`;
+  menu.hidden = false;
+  menu.style.left = `${Math.min(r.left, window.innerWidth - 190)}px`;
+  menu.style.top = `${Math.min(r.bottom + 4, window.innerHeight - 140)}px`;
+  menu.onclick = (e) => {
+    const act = e.target.closest('[data-fm]')?.dataset.fm;
+    menu.hidden = true;
+    if (act === 'add') addFolder(id);
+    if (act === 'rename') renameFolder(f);
+    if (act === 'delete') removeFolder(f);
+  };
+}
+
+function renameFolder(f) {
+  const name = prompt('폴더 이름 변경', f.name)?.trim();
+  if (!name) return;
+  f.name = name;
+  f.updatedAt = Date.now();
+  store.saveFolder(f);
   renderList();
-  renderEditorHeader();
+  renderEditorHeader({ keepTitle: true });
+}
+
+async function removeFolder(f) {
+  const parent = folderById(f.parentId);
+  const subfolders = childrenOf(f.id);
+  const notes = state.notes.filter((n) => n.folderId === f.id);
+  const dest = parent ? `'${parent.name}' 폴더` : (subfolders.length ? '최상위·미분류' : "'모든 노트'(미분류)");
+  if (!confirm(`'${f.name}' 폴더를 삭제할까요?\n안의 노트 ${notes.length}개${subfolders.length ? `와 하위 폴더 ${subfolders.length}개` : ''}는 지워지지 않고 ${dest}로 옮겨집니다.`)) return;
+  await flushSave();
+  store.deleteFolder(f.id, { notes, subfolders, parentId: f.parentId ?? null });
+  state.folders = state.folders.filter((x) => x.id !== f.id);
+  if (state.filter === f.id) state.filter = f.parentId || 'all';
+  renderList();
+  renderEditorHeader({ keepTitle: true });
 }
 
 async function toggleFav() {
@@ -474,18 +566,22 @@ $('#settings').addEventListener('close', async () => {
 /* ───────── 이벤트 연결 ───────── */
 document.addEventListener('click', async (e) => {
   const t = e.target;
+  if (!t.closest('#ctx-menu') && !t.closest('[data-folder-menu]')) $('#ctx-menu').hidden = true;
+  const caret = t.closest('[data-collapse]');
+  if (caret) return toggleCollapse(caret.dataset.collapse);
   const folder = t.closest('[data-folder]');
   if (folder) {
     await flushSave();
     state.filter = folder.dataset.folder;
+    if (state.filter === 'all') state.tag = ''; // '모든 노트'는 태그 필터도 해제
     state.search = '';
     $('#search').value = '';
     app.dataset.view = 'list';
     return renderList();
   }
   const menu = t.closest('[data-folder-menu]');
-  if (menu) return folderMenu(menu.dataset.folderMenu);
-  if (t.closest('#btn-add-folder')) return addFolder();
+  if (menu) return folderMenu(menu.dataset.folderMenu, menu);
+  if (t.closest('#btn-add-folder')) return addFolder(null);
   const chip = t.closest('.tag-chip');
   if (chip) {
     e.stopPropagation();
@@ -512,6 +608,7 @@ document.addEventListener('click', async (e) => {
   if (t.closest('#btn-settings')) return openSettings();
   if (t.closest('#btn-signin')) return doSignIn();
   if (t.closest('#btn-signout')) return doSignOut();
+  if (t.closest('#btn-install')) return installApp();
   if (t.closest('#btn-restore')) return restoreNote();
   if (t.closest('#btn-purge')) return purgeNote();
 });
@@ -618,6 +715,60 @@ async function onSignedOut() {
   document.body.classList.add('signed-out');
 }
 
+/* ───────── 앱 설치·업데이트 (4단계) ───────── */
+let installEvent = null;
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault(); // 브라우저 기본 안내 대신 설정 창의 '앱 설치' 버튼 사용
+  installEvent = e;
+  $('#btn-install').hidden = false;
+});
+window.addEventListener('appinstalled', () => {
+  installEvent = null;
+  $('#btn-install').hidden = true;
+});
+async function installApp() {
+  if (!installEvent) return;
+  installEvent.prompt();
+  await installEvent.userChoice;
+  installEvent = null;
+  $('#btn-install').hidden = true;
+}
+
+function showUpdateToast(worker) {
+  const t = $('#toast');
+  t.innerHTML = `새 버전이 준비되었습니다. <button class="btn-text" id="btn-update">새로고침</button>`;
+  t.hidden = false;
+  $('#btn-update').onclick = async () => {
+    await flushAllDrawings();
+    await flushSave();
+    worker.postMessage('skipWaiting');
+  };
+}
+
+function registerServiceWorker() {
+  if (!('serviceWorker' in navigator) || !import.meta.env.PROD) return;
+  let reloading = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (reloading) return;
+    reloading = true;
+    location.reload();
+  });
+  navigator.serviceWorker.register('sw.js').then((reg) => {
+    if (reg.waiting && navigator.serviceWorker.controller) showUpdateToast(reg.waiting);
+    reg.addEventListener('updatefound', () => {
+      const w = reg.installing;
+      w?.addEventListener('statechange', () => {
+        if (w.state === 'installed' && navigator.serviceWorker.controller) showUpdateToast(w);
+      });
+    });
+    // 앱을 오래 켜 두어도 하루 한 번 새 버전 확인
+    setInterval(() => reg.update().catch(() => {}), 24 * 60 * 60 * 1000);
+  }).catch((err) => console.warn('[YB-EverNote] 서비스 워커 등록 실패', err));
+}
+
+const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const isStandalone = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+
 /* ───────── 시작 ───────── */
 (async () => {
   $('#version').textContent = VERSION;
@@ -625,6 +776,9 @@ async function onSignedOut() {
   renderList();
   renderEditorHeader();
   finishRedirect();
+  registerServiceWorker();
+  $('#ios-hint').hidden = !(isIOS && !isStandalone);
+  document.body.classList.toggle('standalone', isStandalone);
   watchAuth((user) => (user ? onSignedIn(user) : onSignedOut()));
   if (navigator.storage?.persist) navigator.storage.persist().catch(() => {});
 })();

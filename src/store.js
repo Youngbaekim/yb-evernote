@@ -88,9 +88,12 @@ export function saveFolder(folder) {
 }
 
 /** 폴더 삭제: 안의 노트는 '미분류'로 이동 */
-export async function deleteFolder(id, notesInFolder) {
+/** 폴더 삭제: 안의 노트와 하위 폴더는 상위 폴더(없으면 '미분류'·최상위)로 이동 */
+export async function deleteFolder(id, { notes = [], subfolders = [], parentId = null } = {}) {
   const batch = writeBatch(fs);
-  for (const n of notesInFolder) batch.update(ref('notes', n.id), { folderId: null, updatedAt: Date.now(), updatedBy: DEVICE_ID });
+  const now = Date.now();
+  for (const n of notes) batch.update(ref('notes', n.id), { folderId: parentId, updatedAt: now, updatedBy: DEVICE_ID });
+  for (const f of subfolders) batch.update(ref('folders', f.id), { parentId, updatedAt: now });
   batch.delete(ref('folders', id));
   batch.commit().catch(report('폴더 삭제'));
 }

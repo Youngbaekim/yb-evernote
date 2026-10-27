@@ -99,6 +99,8 @@
       <p id="login-msg" class="login-msg"></p>
     </div>
   </div>
+  <div id="toast" class="toast" hidden></div>
+  <div id="ctx-menu" class="ctx-menu" hidden></div>
   <dialog id="settings" class="settings">
     <form method="dialog">
       <h3>설정</h3>
@@ -118,6 +120,12 @@
         <label><input type="radio" name="background" value="lined" /> 줄노트</label>
         <label><input type="radio" name="background" value="blank" /> 무지</label>
         <label><input type="radio" name="background" value="grid" /> 모눈</label>
+      </fieldset>
+      <fieldset>
+        <legend>앱 설치</legend>
+        <button type="button" class="btn-primary" id="btn-install" hidden>이 기기에 앱으로 설치</button>
+        <p id="ios-hint" class="hint" hidden>iPhone·iPad: Safari 아래쪽 <b>공유 버튼(□↑)</b> → <b>홈 화면에 추가</b></p>
+        <p class="hint">PC(Chrome·Edge): 주소창 오른쪽 설치 아이콘으로도 설치할 수 있습니다.</p>
       </fieldset>
       <fieldset>
         <legend>계정</legend>
