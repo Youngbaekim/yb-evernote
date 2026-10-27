@@ -47,7 +47,102 @@ async function urlFor(imageId) {
   return url;
 }
 
+/* ── 그림 크기 조절 ──
+   모서리 4곳: 가로세로 비율 유지 (노트 폭을 넘지 않음)
+   변 4곳: 좌우 변은 가로만, 위아래 변은 세로만 */
+const HANDLES = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'];
+class ImageView {
+  constructor({ node, editor, getPos }) {
+    this.node = node;
+    this.editor = editor;
+    this.getPos = getPos;
+    const dom = document.createElement('div');
+    dom.className = 'img-block';
+    dom.contentEditable = 'false';
+    dom.innerHTML = `<div class="img-wrap"><img alt="" draggable="false" />${HANDLES.map((h) => `<span class="img-h" data-h="${h}"></span>`).join('')}</div>`;
+    this.dom = dom;
+    this.wrap = dom.querySelector('.img-wrap');
+    this.img = dom.querySelector('img');
+    this.render();
+    dom.querySelectorAll('.img-h').forEach((h) => h.addEventListener('pointerdown', (e) => this.start(e, h.dataset.h)));
+  }
+
+  render() {
+    const { src, width, height } = this.node.attrs;
+    if (this.img.getAttribute('src') !== src) this.img.setAttribute('src', src || '');
+    // 폭은 노트 폭을 넘지 않게, 비율은 aspect-ratio로 유지 (좁은 화면에서도 모양 그대로)
+    this.wrap.style.width = width ? `${width}px` : '';
+    this.img.style.aspectRatio = width && height ? `${width} / ${height}` : '';
+  }
+
+  start(e, dir) {
+    if (!this.editor.isEditable) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const h = e.currentTarget;
+    try { h.setPointerCapture(e.pointerId); } catch { /* 무시 */ }
+    const w0 = this.img.offsetWidth;
+    const h0 = this.img.offsetHeight;
+    const maxW = this.dom.parentElement?.clientWidth || w0;
+    const x0 = e.clientX;
+    const y0 = e.clientY;
+    const ratio = w0 / h0;
+    let w = w0;
+    let ht = h0;
+    this.dom.classList.add('resizing');
+    const move = (ev) => {
+      const dx = ev.clientX - x0;
+      const dy = ev.clientY - y0;
+      const sx = dir.includes('w') ? -dx : dir.includes('e') ? dx : 0;
+      const sy = dir.includes('n') ? -dy : dir.includes('s') ? dy : 0;
+      if (dir.length === 2) {
+        // 모서리: 더 많이 움직인 쪽 기준으로 같은 비율로
+        const grow = Math.abs(sx) >= Math.abs(sy * ratio) ? sx : sy * ratio;
+        w = Math.max(60, Math.min(maxW, w0 + grow));
+        ht = w / ratio;
+      } else if (sx) {
+        w = Math.max(40, Math.min(maxW, w0 + sx));
+        ht = h0;
+      } else {
+        w = w0;
+        ht = Math.max(40, Math.min(4000, h0 + sy));
+      }
+      this.wrap.style.width = `${w}px`;
+      this.img.style.aspectRatio = `${w} / ${ht}`;
+    };
+    const up = () => {
+      h.removeEventListener('pointermove', move);
+      h.removeEventListener('pointerup', up);
+      h.removeEventListener('pointercancel', up);
+      this.dom.classList.remove('resizing');
+      const pos = this.getPos();
+      if (typeof pos !== 'number') return;
+      this.editor.view.dispatch(
+        this.editor.view.state.tr.setNodeMarkup(pos, undefined, { ...this.node.attrs, width: Math.round(w), height: Math.round(ht) })
+      );
+    };
+    h.addEventListener('pointermove', move);
+    h.addEventListener('pointerup', up);
+    h.addEventListener('pointercancel', up);
+  }
+
+  update(node) {
+    if (node.type !== this.node.type) return false;
+    this.node = node;
+    this.render();
+    return true;
+  }
+
+  selectNode() { this.dom.classList.add('selected'); }
+  deselectNode() { this.dom.classList.remove('selected'); }
+  stopEvent(e) { return !!e.target.closest?.('.img-h'); }
+  ignoreMutation() { return true; }
+}
+
 const NoteImage = Image.extend({
+  addNodeView() {
+    return (props) => new ImageView(props);
+  },
   addAttributes() {
     return {
       ...this.parent?.(),
@@ -169,7 +264,7 @@ export function createEditor(element, { onUpdate, getNoteId, onInk }) {
       Highlight.configure({ multicolor: true }),
       TaskList,
       TaskItem.configure({ nested: true }),
-      NoteImage.configure({ resize: { enabled: true, minWidth: 60, alwaysPreserveAspectRatio: true, directions: ['top-left', 'top-right', 'bottom-left', 'bottom-right'] } }),
+      NoteImage.configure({ resize: false }),
       Drawing.configure({ getNoteId, onInk }),
       SearchHighlight,
       Placeholder.configure({ placeholder: '내용을 입력하세요. 그림은 Ctrl+V로 붙여 넣을 수 있습니다.' }),

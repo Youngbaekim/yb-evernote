@@ -5,7 +5,7 @@ import { createEditor, toStorableJSON, hydrateJSON, setSearchTerm, FONTS, SIZES,
 import { newDrawingAttrs, flushAllDrawings, getDrawingView } from './drawing.js';
 import { makeSortable } from './sortable.js';
 
-const VERSION = 'v0.5.1 · 5단계';
+const VERSION = 'v0.5.2 · 5단계';
 const $ = (sel) => document.querySelector(sel);
 const app = $('#app');
 

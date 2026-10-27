@@ -15,6 +15,17 @@ const MAX_CHUNK_CHARS = 450_000; // 묶음 1건 약 500KB 이하
 const PAPER_INK = { line: '#D6DCE4', page: '#9AA5B0' };
 
 
+/* 도구 아이콘 (단순 선 그림) */
+const svg = (d, w = 1.8) => `<svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="${w}" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
+const ICON = {
+  pen: svg('<path d="M15.5 4.5l4 4L8 20l-4.7.7L4 16z"/><path d="M13.5 6.5l4 4"/>'),
+  eraser: svg('<g transform="rotate(45 12 12)"><rect x="7.5" y="3" width="9" height="18" rx="2.2"/><path d="M7.5 15h9"/></g>'),
+  marker: svg('<path d="M14 3.5l6.5 6.5-7 7-6.5-6.5z"/><path d="M7 10.5l6.5 6.5-2.5 2.5H7.5L5 17z"/><path d="M5 17l-2 3.5h5"/>'),
+  move: svg('<path d="M12 3v18M3 12h18"/><path d="M9 6l3-3 3 3M9 18l3 3 3-3M6 9l-3 3 3 3M18 9l3 3-3 3"/>'),
+  grow: svg('<path d="M12 3.5v12M6.5 10l5.5 5.5 5.5-5.5M4.5 20.5h15"/>', 2.8),
+  shrink: svg('<path d="M12 20.5v-12M6.5 14l5.5-5.5 5.5 5.5M4.5 3.5h15"/>', 2.8),
+};
+
 /* 여러 블록이 공유하는 도구 상태 */
 const ink = { tool: 'pen', color: PEN_COLORS[0], hlColor: HL_COLORS[0], size: 'normal' };
 let penSeen = false; // 펜 입력이 한 번이라도 있었으면 손가락은 화면 이동 전용
@@ -63,20 +74,14 @@ class DrawingView {
     dom.innerHTML = `
       <div class="ink-bar">
         <div class="ink-group">
-          <button data-ink-tool="pen" class="ink-tool" title="펜">✒<span>펜</span></button>
-          <button data-ink-tool="eraser" class="ink-tool" title="지우개 — 닿은 획을 통째로 지움 (펜 옆 버튼을 누른 채 써도 지우개)"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><g transform="rotate(45 12 12)"><rect x="7.5" y="3" width="9" height="18" rx="2.2"/><path d="M7.5 15h9"/></g></svg><span>지우개</span></button>
-          <button data-ink-tool="highlighter" class="ink-tool" title="형광펜">🖍<span>형광펜</span></button>
-          <button data-ink-tool="hand" class="ink-tool" title="화면 이동(손가락으로 넘기기)">✋<span>이동</span></button>
+          <button data-ink-tool="pen" title="펜">${ICON.pen}</button>
+          <button data-ink-tool="eraser" title="지우개 — 닿은 획을 통째로 지움 (펜 옆 버튼을 누른 채 써도 지우개)">${ICON.eraser}</button>
+          <button data-ink-tool="highlighter" title="형광펜">${ICON.marker}</button>
+          <button data-ink-tool="hand" title="화면 이동 (손가락으로 넘기기)">${ICON.move}</button>
         </div>
         <span class="ink-sep"></span>
-        <div class="ink-group ink-colors"></div>
-        <span class="ink-sep"></span>
-        <div class="ink-group">
-          <button data-ink-size="thin" title="가늘게"><i class="dot s1"></i></button>
-          <button data-ink-size="normal" title="보통"><i class="dot s2"></i></button>
-          <button data-ink-size="thick" title="굵게"><i class="dot s3"></i></button>
-        </div>
-        <span class="ink-sep"></span>
+        <button class="ink-dd" data-ink-dd="color" title="색상"><i class="dd-swatch"></i><span class="dd-caret">▾</span></button>
+        <button class="ink-dd" data-ink-dd="size" title="굵기"><i class="dd-dot"></i><span class="dd-caret">▾</span></button>
         <select class="ink-bg" title="배경">
           <option value="lined">줄노트</option>
           <option value="blank">무지</option>
@@ -85,13 +90,13 @@ class DrawingView {
         <span class="ink-sep"></span>
         <button data-ink-act="undo" title="실행 취소 (Ctrl+Z)">↶</button>
         <button data-ink-act="redo" title="다시 실행 (Ctrl+Y)">↷</button>
-        <button data-ink-act="shrink" class="ink-grow ink-shrink"></button>
-        <button data-ink-act="grow" class="ink-grow"></button>
-        <span class="ink-sep"></span>
+        <button data-ink-act="shrink" class="ink-bold">${ICON.shrink}</button>
+        <button data-ink-act="grow" class="ink-bold">${ICON.grow}</button>
         <button data-ink-act="up" title="필기 블록을 위로 이동 (위 문단과 자리 바꿈)">▲</button>
         <button data-ink-act="down" title="필기 블록을 아래로 이동 (아래 문단과 자리 바꿈)">▼</button>
         <button data-ink-act="done" class="ink-done">완료</button>
       </div>
+      <div class="ink-pop" hidden></div>
       <div class="ink-stage">
         <canvas class="ink-base"></canvas>
         <canvas class="ink-live"></canvas>
@@ -106,6 +111,9 @@ class DrawingView {
 
     this.bar.addEventListener('pointerdown', (e) => e.stopPropagation());
     this.bar.addEventListener('click', (e) => this.onBarClick(e));
+    const pop = dom.querySelector('.ink-pop');
+    pop.addEventListener('pointerdown', (e) => e.stopPropagation());
+    pop.addEventListener('click', (e) => this.onBarClick(e));
     this.bgSel.addEventListener('change', () => this.setAttrs({ background: this.bgSel.value }));
 
     const live = this.live;
@@ -122,30 +130,52 @@ class DrawingView {
 
   renderBar() {
     const isHl = ink.tool === 'highlighter';
-    const colors = isHl ? HL_COLORS : PEN_COLORS;
     const cur = isHl ? ink.hlColor : ink.color;
-    this.bar.querySelector('.ink-colors').innerHTML = colors
-      .map((c) => `<button data-ink-color="${c}" class="swatch ${c === cur ? 'on' : ''}" style="--c:${c}" title="색상"></button>`)
-      .join('');
     this.bar.querySelectorAll('[data-ink-tool]').forEach((b) => b.classList.toggle('on', b.dataset.inkTool === ink.tool));
-    this.bar.querySelectorAll('[data-ink-size]').forEach((b) => b.classList.toggle('on', b.dataset.inkSize === ink.size));
-    this.bar.querySelector('.ink-colors').style.display = ink.tool === 'eraser' || ink.tool === 'hand' ? 'none' : '';
+    const colorBtn = this.bar.querySelector('[data-ink-dd="color"]');
+    const sizeBtn = this.bar.querySelector('[data-ink-dd="size"]');
+    colorBtn.querySelector('.dd-swatch').style.background = cur;
+    sizeBtn.querySelector('.dd-dot').dataset.size = ink.size;
+    const noColor = ink.tool === 'eraser' || ink.tool === 'hand';
+    colorBtn.hidden = noColor;
+    sizeBtn.hidden = noColor || isHl;
     this.bgSel.value = this.node.attrs.background;
     const a4 = this.node.attrs.paper === 'a4';
     const growBtn = this.bar.querySelector('[data-ink-act="grow"]');
     const shrinkBtn = this.bar.querySelector('[data-ink-act="shrink"]');
-    growBtn.textContent = a4 ? '＋ 쪽' : '↧ 늘리기';
     growBtn.title = a4 ? 'A4 쪽 추가' : '필기 영역 늘리기';
-    shrinkBtn.textContent = a4 ? '－ 쪽' : '↥ 줄이기';
-    shrinkBtn.title = a4 ? '마지막 쪽 삭제(빈 쪽만)' : '필기 영역 줄이기(아래쪽 빈 공간만)';
+    shrinkBtn.title = a4 ? '마지막 쪽 삭제 (빈 쪽만)' : '필기 영역 줄이기 (아래쪽 빈 공간만)';
     shrinkBtn.disabled = this.shrinkTarget() === null;
     this.stage.classList.toggle('eraser', ink.tool === 'eraser');
     this.stage.classList.toggle('hand', ink.tool === 'hand');
   }
 
+  /** 색상·굵기 선택 상자 */
+  openPop(kind, btn) {
+    const pop = this.dom.querySelector('.ink-pop');
+    if (!pop.hidden && pop.dataset.kind === kind) { pop.hidden = true; return; }
+    const isHl = ink.tool === 'highlighter';
+    if (kind === 'color') {
+      const cur = isHl ? ink.hlColor : ink.color;
+      pop.innerHTML = (isHl ? HL_COLORS : PEN_COLORS)
+        .map((c) => `<button data-ink-color="${c}" class="swatch ${c === cur ? 'on' : ''}" style="--c:${c}" title="색상"></button>`).join('');
+    } else {
+      pop.innerHTML = ['thin', 'normal', 'thick']
+        .map((k) => `<button data-ink-size="${k}" class="size-opt ${k === ink.size ? 'on' : ''}" title="${{ thin: '가늘게', normal: '보통', thick: '굵게' }[k]}"><i class="dd-dot" data-size="${k}"></i></button>`).join('');
+    }
+    pop.dataset.kind = kind;
+    const r = btn.getBoundingClientRect();
+    const host = this.dom.getBoundingClientRect();
+    pop.style.left = `${Math.max(4, r.left - host.left)}px`;
+    pop.style.top = `${r.bottom - host.top + 4}px`;
+    pop.hidden = false;
+  }
+
   onBarClick(e) {
     const b = e.target.closest('button');
     if (!b) return;
+    if (b.dataset.inkDd) return this.openPop(b.dataset.inkDd, b);
+    this.dom.querySelector('.ink-pop').hidden = true;
     if (b.dataset.inkTool) ink.tool = b.dataset.inkTool;
     if (b.dataset.inkColor) {
       if (ink.tool === 'highlighter') ink.hlColor = b.dataset.inkColor;
@@ -252,6 +282,7 @@ class DrawingView {
 
   deactivate() {
     if (activeView !== this) return;
+    this.dom.querySelector('.ink-pop').hidden = true;
     activeView = null;
     this.dom.classList.remove('active');
     this.flush();
