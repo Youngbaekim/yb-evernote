@@ -17,6 +17,7 @@
   <title>YB-EverNote</title>
 </head>
 <body class="signed-out">
+  <h1 id="print-title" class="print-only"></h1>
   <div id="app" class="app" data-view="list">
     <!-- 1열: 폴더 -->
     <aside class="pane pane-folders" aria-label="폴더">
@@ -57,6 +58,8 @@
           <option value="grid">모눈</option>
         </select>
         <select id="sel-move" class="sel-move" title="폴더 이동" disabled></select>
+        <button class="icon-btn" id="btn-lock" title="이 노트 잠그기" disabled>🔓</button>
+        <button class="icon-btn" id="btn-print" title="인쇄 · PDF로 저장" disabled>🖨</button>
         <button class="icon-btn" id="btn-delete" title="휴지통으로" disabled>🗑</button>
       </header>
       <div class="toolbar" id="toolbar" aria-label="도구 모음">
@@ -130,6 +133,21 @@
         <button type="button" class="btn-primary" id="btn-install" hidden>이 기기에 앱으로 설치</button>
         <p id="ios-hint" class="hint" hidden>iPhone·iPad: Safari 아래쪽 <b>공유 버튼(□↑)</b> → <b>홈 화면에 추가</b></p>
         <p class="hint">PC(Chrome·Edge): 주소창 오른쪽 설치 아이콘으로도 설치할 수 있습니다.</p>
+      </fieldset>
+      <fieldset>
+        <legend>잠금 노트</legend>
+        <button type="button" class="btn-ghost" id="btn-pin">잠금 비밀번호 정하기</button>
+        <p class="hint">잠긴 노트는 목록에서 내용이 가려지고, 열 때 비밀번호를 묻습니다. 한 번 풀면 10분간 유지되며 앱을 30초 넘게 벗어나면 다시 잠깁니다. 내용을 암호화하는 기능은 아닙니다.</p>
+      </fieldset>
+      <fieldset>
+        <legend>백업</legend>
+        <div class="row-btns">
+          <button type="button" class="btn-primary" id="btn-backup">전체 백업 파일 받기</button>
+          <button type="button" class="btn-ghost" id="btn-restore-file">백업 파일로 복원</button>
+        </div>
+        <input id="file-restore" type="file" accept="application/json,.json" hidden />
+        <p class="hint" id="last-backup"></p>
+        <p class="hint">노트·폴더·그림·필기·설정을 파일 하나(.json)로 저장합니다. OneDrive 등 안전한 곳에 보관해 주세요.</p>
       </fieldset>
       <fieldset>
         <legend>계정</legend>

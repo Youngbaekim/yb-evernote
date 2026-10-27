@@ -1,11 +1,11 @@
 import './style.css';
 import * as store from './store.js';
 import { signIn, signOutUser, watchAuth, finishRedirect } from './firebase.js';
-import { createEditor, toStorableJSON, hydrateJSON, FONTS, SIZES, HIGHLIGHTS, TEXT_COLORS } from './editor.js';
+import { createEditor, toStorableJSON, hydrateJSON, setSearchTerm, FONTS, SIZES, HIGHLIGHTS, TEXT_COLORS } from './editor.js';
 import { newDrawingAttrs, flushAllDrawings, getDrawingView } from './drawing.js';
 import { makeSortable } from './sortable.js';
 
-const VERSION = 'v0.4.4 · 4단계';
+const VERSION = 'v0.5.0 · 5단계';
 const $ = (sel) => document.querySelector(sel);
 const app = $('#app');
 
@@ -123,13 +123,131 @@ async function openNote(id) {
     $('#empty-state').hidden = false;
     return;
   }
+  if (note.locked && !isUnlocked()) {
+    // 잠긴 노트: 비밀번호를 넣기 전에는 내용을 불러오지 않음
+    editor.commands.setContent('', { emitUpdate: false });
+    $('#editor').hidden = true;
+    $('#empty-state').hidden = true;
+    showLockGate(note);
+    return;
+  }
+  $('#lock-gate')?.remove();
   $('#editor').hidden = false;
   $('#empty-state').hidden = true;
   const content = await hydrateJSON(note.content);
   editor.commands.setContent(content || '', { emitUpdate: false });
   editor.setEditable(!note.trashedAt, false); // false: 여는 것만으로는 '수정됨'으로 저장하지 않음
+  setSearchTerm(editor, state.search.trim());
   setSaveState('');
   updateToolbar();
+}
+
+/* ───────── 본문 전체 검색 ───────── */
+const textCache = new Map(); // 노트 ID → { at, text }
+function plainText(node, out = []) {
+  if (!node) return out;
+  if (node.type === 'text') out.push(node.text);
+  if (node.type === 'drawing') out.push(' ');
+  (node.content || []).forEach((c) => plainText(c, out));
+  if (['paragraph', 'heading', 'listItem', 'taskItem'].includes(node.type)) out.push('\n');
+  return out;
+}
+function fullText(n) {
+  const hit = textCache.get(n.id);
+  if (hit && hit.at === n.updatedAt) return hit.text;
+  const text = plainText(n.content).join('').replace(/\n{2,}/g, '\n').trim();
+  textCache.set(n.id, { at: n.updatedAt, text });
+  return text;
+}
+/** 검색어 주변 문장 일부 (찾은 단어는 굵게) */
+function snippet(text, q) {
+  const i = text.toLowerCase().indexOf(q);
+  if (i < 0) return null;
+  const start = Math.max(0, i - 24);
+  const pre = (start > 0 ? '…' : '') + text.slice(start, i);
+  return `${esc(pre)}<b class="hit">${esc(text.slice(i, i + q.length))}</b>${esc(text.slice(i + q.length, i + q.length + 60))}`.replace(/\n/g, ' ');
+}
+
+/* ───────── 잠금 노트 (내용 가리기) ───────── */
+let unlockedUntil = 0;
+const UNLOCK_MS = 10 * 60 * 1000; // 한 번 풀면 10분 동안, 앱을 백그라운드로 보내면 바로 다시 잠김
+const isUnlocked = () => Date.now() < unlockedUntil;
+async function hashPin(pin, salt) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`${salt}:${pin}`));
+  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+async function setPin() {
+  const s = state.settings;
+  if (s.pinHash) {
+    const old = prompt('현재 잠금 비밀번호');
+    if (old === null) return false;
+    if ((await hashPin(old, s.pinSalt)) !== s.pinHash) { alert('비밀번호가 맞지 않습니다.'); return false; }
+  }
+  const p1 = prompt('새 잠금 비밀번호 (숫자 또는 문자 4자 이상)');
+  if (p1 === null) return false;
+  if (p1.length < 4) { alert('4자 이상으로 정해 주세요.'); return false; }
+  const p2 = prompt('한 번 더 입력해 주세요');
+  if (p2 !== p1) { alert('두 번 입력한 비밀번호가 다릅니다.'); return false; }
+  const salt = crypto.getRandomValues(new Uint32Array(2)).join('-');
+  state.settings = { ...s, pinSalt: salt, pinHash: await hashPin(p1, salt) };
+  store.saveSettings(state.settings);
+  unlockedUntil = Date.now() + UNLOCK_MS;
+  return true;
+}
+async function checkPin(pin) {
+  const s = state.settings;
+  return !!s.pinHash && (await hashPin(pin, s.pinSalt)) === s.pinHash;
+}
+function showLockGate(note) {
+  $('#lock-gate')?.remove();
+  $('.editor-wrap').insertAdjacentHTML('beforeend', `
+    <form id="lock-gate" class="lock-gate">
+      <div class="lg-icon">🔒</div>
+      <p class="lg-title">잠긴 노트입니다</p>
+      <p class="lg-sub">${esc(titleOf(note))}</p>
+      <input id="lg-pin" type="password" inputmode="numeric" autocomplete="off" placeholder="잠금 비밀번호" />
+      <button class="btn-primary" type="submit">열기</button>
+      <p id="lg-msg" class="lg-msg"></p>
+    </form>`);
+  $('#lg-pin').focus();
+  $('#lock-gate').onsubmit = async (e) => {
+    e.preventDefault();
+    if (await checkPin($('#lg-pin').value)) {
+      unlockedUntil = Date.now() + UNLOCK_MS;
+      $('#lock-gate').remove();
+      renderList();
+      openNote(note.id);
+    } else {
+      $('#lg-msg').textContent = '비밀번호가 맞지 않습니다.';
+      $('#lg-pin').select();
+    }
+  };
+}
+async function toggleLock() {
+  const n = current();
+  if (!n) return;
+  await flushSave();
+  if (n.locked) {
+    if (!isUnlocked()) return; // 잠금 화면에서 먼저 풀어야 함
+    if (!confirm('이 노트의 잠금을 해제할까요?')) return;
+    n.locked = false;
+  } else {
+    if (!state.settings.pinHash) {
+      alert('먼저 잠금 비밀번호를 정합니다. (모든 잠긴 노트에 같은 비밀번호를 씁니다)');
+      if (!(await setPin())) return;
+    }
+    n.locked = true;
+    unlockedUntil = Date.now() + UNLOCK_MS; // 잠근 직후에는 계속 볼 수 있음
+  }
+  store.updateFields('notes', n.id, { locked: n.locked });
+  renderList();
+  renderEditorHeader({ keepTitle: true });
+}
+function relock() {
+  unlockedUntil = 0;
+  const n = current();
+  if (n?.locked) openNote(n.id);
+  renderList();
 }
 
 /* ───────── 렌더링 ───────── */
@@ -139,11 +257,16 @@ function visibleNotes() {
   else {
     list = list.filter((n) => !n.trashedAt);
     if (state.filter === 'fav') list = list.filter((n) => n.fav);
+    else if (state.filter === 'locked') list = list.filter((n) => n.locked);
     else if (state.filter !== 'all') list = list.filter((n) => n.folderId === state.filter);
   }
   if (state.tag) list = list.filter((n) => tagsOf(n.title).includes(state.tag));
   const q = state.search.trim().toLowerCase();
-  if (q) list = list.filter((n) => titleOf(n).toLowerCase().includes(q) || (n.preview || '').toLowerCase().includes(q));
+  if (q) {
+    list = list.filter((n) =>
+      (n.title || '').toLowerCase().includes(q) || ((!n.locked || isUnlocked()) && fullText(n).toLowerCase().includes(q))
+    );
+  }
   return sortNotes(list);
 }
 
@@ -239,9 +362,20 @@ function renderTagSelect() {
   sel.classList.toggle('on', !!state.tag);
 }
 
+function previewOf(n) {
+  if (n.locked && !isUnlocked()) return '<i>잠긴 노트</i>';
+  const q = state.search.trim().toLowerCase();
+  if (q) {
+    const s = snippet(fullText(n), q);
+    if (s) return s;
+  }
+  return esc((n.preview || '').replace(/\n+/g, ' ').slice(0, 70));
+}
+
 function filterName() {
   if (state.filter === 'all') return '모든 노트';
   if (state.filter === 'fav') return '즐겨찾기';
+  if (state.filter === 'locked') return '잠긴 노트';
   if (state.filter === 'trash') return '휴지통';
   return folderPath(state.filter).map((f) => f.name).join(' › ') || '폴더';
 }
@@ -251,11 +385,13 @@ function renderFolders() {
   const count = {
     all: live.length,
     fav: live.filter((n) => n.fav).length,
+    locked: live.filter((n) => n.locked).length,
     trash: state.notes.filter((n) => n.trashedAt).length,
   };
   const sys = [
     { id: 'all', name: '모든 노트', icon: '▤' },
     { id: 'fav', name: '즐겨찾기', icon: '☆' },
+    { id: 'locked', name: '잠긴 노트', icon: '🔒' },
     { id: 'trash', name: '휴지통', icon: '🗑' },
   ];
   const item = (f, icon, n, editable) => `
@@ -304,10 +440,10 @@ function renderList() {
   $('#note-list').classList.toggle('manual', sortSel.value === 'manual');
   renderTagSelect();
   $('#btn-new').hidden = state.filter === 'trash';
-  $('#btn-new-folder').hidden = ['all', 'fav', 'trash'].includes(state.filter);
+  $('#btn-new-folder').hidden = ['all', 'fav', 'locked', 'trash'].includes(state.filter);
   const notes = visibleNotes();
   const live = state.notes.filter((n) => !n.trashedAt);
-  const isFolder = !['all', 'fav', 'trash'].includes(state.filter);
+  const isFolder = !['all', 'fav', 'locked', 'trash'].includes(state.filter);
   const subs = isFolder && !state.search.trim() ? childrenOf(state.filter) : [];
   const empty = state.filter === 'trash' ? '휴지통이 비어 있습니다.' : '노트가 없습니다. ＋ 새 노트를 눌러 시작하세요.';
   const subHtml = subs.length
@@ -324,8 +460,8 @@ function renderList() {
           (n) => `
       <li>
         <button class="note-card ${state.noteId === n.id ? 'active' : ''}" data-note="${n.id}">
-          <span class="nc-title">${n.fav ? '<span class="star">★</span> ' : ''}${esc(titleOf(n))}${tagsOf(n.title).map((t) => `<span class="tag-chip" data-tag="${esc(t)}">#${esc(t)}</span>`).join('')}</span>
-          <span class="nc-preview">${esc((n.preview || '').replace(/\n+/g, ' ').slice(0, 70))}</span>
+          <span class="nc-title">${n.fav ? '<span class="star">★</span> ' : ''}${n.locked ? '<span class="lock">🔒</span> ' : ''}${esc(titleOf(n))}${tagsOf(n.title).map((t) => `<span class="tag-chip" data-tag="${esc(t)}">#${esc(t)}</span>`).join('')}</span>
+          <span class="nc-preview">${previewOf(n)}</span>
           <span class="nc-meta">${fmtDate(n.updatedAt)}${n.folderId && state.filter === 'all' ? ' · ' + esc(folderPath(n.folderId).map((f) => f.name).join(' › ')) : ''}</span>
         </button>
       </li>`
@@ -345,6 +481,11 @@ function renderEditorHeader({ keepTitle = false } = {}) {
   $('#btn-fav').textContent = note?.fav ? '★' : '☆';
   $('#btn-fav').classList.toggle('on', !!note?.fav);
   $('#btn-delete').disabled = !has;
+  $('#btn-lock').disabled = !has || trashed;
+  $('#btn-lock').textContent = note?.locked ? '🔒' : '🔓';
+  $('#btn-lock').title = note?.locked ? '잠긴 노트 (눌러서 잠금 해제)' : '이 노트 잠그기';
+  $('#btn-lock').classList.toggle('on', !!note?.locked);
+  $('#btn-print').disabled = !has || (note?.locked && !isUnlocked());
   $('#btn-delete').title = trashed ? '영구 삭제' : '휴지통으로';
   $('#sel-move').disabled = !has || trashed;
   $('#sel-bg').disabled = !has || trashed;
@@ -449,7 +590,7 @@ async function reloadOpenNoteFromRemote() {
 const syncHandlers = {
   onFolders(list) {
     state.folders = list;
-    if (!['all', 'fav', 'trash'].includes(state.filter) && !list.some((f) => f.id === state.filter)) state.filter = 'all';
+    if (!['all', 'fav', 'locked', 'trash'].includes(state.filter) && !list.some((f) => f.id === state.filter)) state.filter = 'all';
     renderList();
     renderEditorHeader({ keepTitle: true });
   },
@@ -491,7 +632,7 @@ window.addEventListener('offline', () => syncHandlers.onStatus({ pending: true }
 
 async function newNote() {
   await flushSave();
-  const folderId = ['all', 'fav', 'trash'].includes(state.filter) ? null : state.filter;
+  const folderId = ['all', 'fav', 'locked', 'trash'].includes(state.filter) ? null : state.filter;
   const now = Date.now();
   const note = {
     id: store.newId('note'),
@@ -644,6 +785,8 @@ function openSettings() {
   dlg.querySelector(`[name=background][value=${s.background}]`).checked = true;
   dlg.querySelector(`[name=textBackground][value=${s.textBackground}]`).checked = true;
   $('#account-email').textContent = state.user?.email ?? '';
+  $('#btn-pin').textContent = state.settings.pinHash ? '잠금 비밀번호 변경' : '잠금 비밀번호 정하기';
+  $('#last-backup').textContent = lastBackupText();
   dlg.showModal();
 }
 $('#settings').addEventListener('close', async () => {
@@ -710,6 +853,9 @@ document.addEventListener('click', async (e) => {
   if (t.closest('#btn-signin')) return doSignIn();
   if (t.closest('#btn-signout')) return doSignOut();
   if (t.closest('#btn-install')) return installApp();
+  if (t.closest('#btn-pin')) return setPin().then((ok) => ok && alert('잠금 비밀번호를 저장했습니다.'));
+  if (t.closest('#btn-backup')) return doBackup();
+  if (t.closest('#btn-restore-file')) return $('#file-restore').click();
   if (t.closest('#btn-restore')) return restoreNote();
   if (t.closest('#btn-purge')) return purgeNote();
 });
@@ -723,6 +869,8 @@ $('#btn-new').addEventListener('click', newNote);
 $('#btn-new-folder').addEventListener('click', () => addFolder(state.filter));
 $('#btn-fav').addEventListener('click', toggleFav);
 $('#btn-delete').addEventListener('click', deleteNote);
+$('#btn-lock').addEventListener('click', toggleLock);
+$('#btn-print').addEventListener('click', printNote);
 $('#sel-move').addEventListener('change', (e) => moveNote(e.target.value));
 $('#sel-bg').addEventListener('change', (e) => setNoteBackground(e.target.value));
 $('#sel-sort').addEventListener('change', (e) => {
@@ -766,6 +914,7 @@ $('#note-title').addEventListener('keydown', (e) => {
 $('#search').addEventListener('input', (e) => {
   state.search = e.target.value;
   renderList();
+  if (state.noteId && !$('#editor').hidden) setSearchTerm(editor, state.search.trim());
 });
 $('#sel-font').addEventListener('change', (e) => {
   const v = e.target.value;
@@ -783,10 +932,90 @@ $('#file-image').addEventListener('change', (e) => {
 });
 
 // 창을 닫거나 백그라운드로 갈 때 저장
+let hiddenAt = 0;
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'hidden') { flushAllDrawings(); flushSave(); }
+  if (document.visibilityState === 'hidden') {
+    flushAllDrawings();
+    flushSave();
+    hiddenAt = Date.now();
+  } else if (hiddenAt && Date.now() - hiddenAt > 30 * 1000 && isUnlocked()) {
+    relock(); // 30초 넘게 다른 앱에 있다 돌아오면 잠긴 노트를 다시 잠금
+  }
 });
+setInterval(() => { if (unlockedUntil && !isUnlocked()) { unlockedUntil = 0; relock(); } }, 30 * 1000);
 window.addEventListener('pagehide', flushSave);
+
+/* ───────── 인쇄·PDF ───────── */
+async function printNote() {
+  await flushAllDrawings();
+  await flushSave();
+  const n = current();
+  if (!n) return;
+  $('#print-title').textContent = stripTags(n.title) || titleOf(n);
+  const prev = document.title;
+  document.title = (stripTags(n.title) || 'YB-EverNote').replace(/[\\/:*?"<>|]/g, ' ');
+  window.print(); // 인쇄 창에서 '대상: PDF로 저장'을 고르면 PDF 파일
+  document.title = prev;
+}
+
+/* ───────── 백업·복원 ───────── */
+const BACKUP_KEY = () => `yb-last-backup-${state.user?.uid}`;
+function lastBackupText() {
+  let t = 0;
+  try { t = Number(localStorage.getItem(BACKUP_KEY()) || 0); } catch { /* 무시 */ }
+  if (!t) return '이 기기에서 백업한 적 없음';
+  const days = Math.floor((Date.now() - t) / 86400000);
+  return `마지막 백업: ${new Date(t).toLocaleDateString('ko-KR')} (${days ? `${days}일 전` : '오늘'})`;
+}
+async function doBackup() {
+  const btn = $('#btn-backup');
+  btn.disabled = true;
+  btn.textContent = '백업 파일 만드는 중…';
+  try {
+    await flushAllDrawings();
+    await flushSave();
+    const data = await store.exportAllCloud();
+    const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
+    const d = new Date();
+    const name = `YB-EverNote_backup_${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}.json`;
+    const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: name });
+    ($('dialog[open]') || document.body).appendChild(a); // 설정 창이 열려 있으면 그 안에서 눌러야 파일 이름이 유지됨
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 2000);
+    try { localStorage.setItem(BACKUP_KEY(), String(Date.now())); } catch { /* 무시 */ }
+    $('#last-backup').textContent = lastBackupText();
+    alert(`백업 파일을 저장했습니다.\n노트 ${data.notes.length}개 · 폴더 ${data.folders.length}개 · 그림 ${data.images.length}장 · 필기 묶음 ${data.chunks.length}개`);
+  } catch (err) {
+    console.error(err);
+    alert('백업하지 못했습니다. 인터넷 연결을 확인한 뒤 다시 시도해 주세요.');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '전체 백업 파일 받기';
+  }
+}
+$('#file-restore').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  e.target.value = '';
+  if (!file) return;
+  let data;
+  try { data = JSON.parse(await file.text()); } catch { return alert('백업 파일을 읽지 못했습니다.'); }
+  if (data?.app !== 'YB-EverNote') return alert('YB-EverNote 백업 파일이 아닙니다.');
+  const msg = `${data.exportedAt?.slice(0, 10) || ''} 백업을 복원할까요?\n노트 ${data.notes.length}개 · 폴더 ${data.folders.length}개 · 그림 ${data.images.length}장\n\n같은 노트는 백업 시점 내용으로 바뀌고, 백업 이후 새로 만든 노트는 그대로 남습니다.`;
+  if (!confirm(msg)) return;
+  await store.importAll(data);
+  alert('복원을 마쳤습니다.');
+});
+function backupReminder() {
+  let t = 0;
+  try { t = Number(localStorage.getItem(BACKUP_KEY()) || 0); } catch { /* 무시 */ }
+  if (state.notes.length < 3 || (t && Date.now() - t < 7 * 86400000)) return;
+  const toast = $('#toast');
+  if (!toast.hidden) return;
+  toast.innerHTML = `${t ? '마지막 백업 후 일주일이 지났습니다.' : '아직 백업 파일이 없습니다.'} <button class="btn-text" id="btn-backup-now">지금 백업</button><button class="btn-text" id="btn-backup-later">나중에</button>`;
+  toast.hidden = false;
+  $('#btn-backup-now').onclick = () => { toast.hidden = true; doBackup(); };
+  $('#btn-backup-later').onclick = () => { toast.hidden = true; };
+}
 
 /* ───────── 로그인 ───────── */
 async function doSignIn() {
@@ -831,6 +1060,7 @@ function onSignedIn(user) {
   renderEditorHeader();
   setTimeout(refreshUsage, 2000);
   offerMigration();
+  setTimeout(backupReminder, 8000);
 }
 
 async function onSignedOut() {

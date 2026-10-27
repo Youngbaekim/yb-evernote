@@ -1,5 +1,7 @@
 // Tiptap 편집기 — 폰트·크기, 체크박스, 형광펜, 그림 붙여넣기
-import { Editor } from '@tiptap/core';
+import { Editor, Extension } from '@tiptap/core';
+import { Plugin, PluginKey } from '@tiptap/pm/state';
+import { Decoration, DecorationSet } from '@tiptap/pm/view';
 import StarterKit from '@tiptap/starter-kit';
 import { TextStyle, FontFamily, FontSize, Color } from '@tiptap/extension-text-style';
 import Highlight from '@tiptap/extension-highlight';
@@ -83,6 +85,50 @@ export async function hydrateJSON(json) {
   return walk(json);
 }
 
+/* ── 본문 검색어 표시 ── */
+const searchKey = new PluginKey('ybSearch');
+function buildHits(doc, term) {
+  if (!term) return DecorationSet.empty;
+  const q = term.toLowerCase();
+  const decos = [];
+  doc.descendants((node, pos) => {
+    if (!node.isText) return;
+    const t = node.text.toLowerCase();
+    for (let i = t.indexOf(q); i >= 0; i = t.indexOf(q, i + q.length)) {
+      decos.push(Decoration.inline(pos + i, pos + i + q.length, { class: 'search-hit' }));
+    }
+  });
+  return DecorationSet.create(doc, decos);
+}
+const SearchHighlight = Extension.create({
+  name: 'searchHighlight',
+  addStorage() {
+    return { term: '' };
+  },
+  addProseMirrorPlugins() {
+    const ext = this;
+    return [
+      new Plugin({
+        key: searchKey,
+        state: {
+          init: () => DecorationSet.empty,
+          apply(tr, old) {
+            if (tr.getMeta(searchKey) !== undefined || tr.docChanged) return buildHits(tr.doc, ext.storage.term);
+            return old;
+          },
+        },
+        props: { decorations: (state) => searchKey.getState(state) },
+      }),
+    ];
+  },
+});
+/** 검색어를 노트 안에 표시하고 첫 위치로 이동 */
+export function setSearchTerm(editor, term) {
+  editor.storage.searchHighlight.term = term || '';
+  editor.view.dispatch(editor.state.tr.setMeta(searchKey, term || ''));
+  if (term) requestAnimationFrame(() => editor.view.dom.querySelector('.search-hit')?.scrollIntoView({ block: 'center' }));
+}
+
 /** 그림 파일들을 압축·저장한 뒤 편집기에 삽입 */
 async function insertImages(editor, files, getNoteId, pos) {
   for (const file of files) {
@@ -123,8 +169,9 @@ export function createEditor(element, { onUpdate, getNoteId, onInk }) {
       Highlight.configure({ multicolor: true }),
       TaskList,
       TaskItem.configure({ nested: true }),
-      NoteImage.configure({ resize: { enabled: true, minWidth: 60, alwaysPreserveAspectRatio: true, directions: ['bottomRight', 'bottomLeft'] } }),
+      NoteImage.configure({ resize: { enabled: true, minWidth: 60, alwaysPreserveAspectRatio: true, directions: ['top-left', 'top-right', 'bottom-left', 'bottom-right'] } }),
       Drawing.configure({ getNoteId, onInk }),
+      SearchHighlight,
       Placeholder.configure({ placeholder: '내용을 입력하세요. 그림은 Ctrl+V로 붙여 넣을 수 있습니다.' }),
     ],
     editorProps: {

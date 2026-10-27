@@ -87,6 +87,9 @@ class DrawingView {
         <button data-ink-act="redo" title="다시 실행 (Ctrl+Y)">↷</button>
         <button data-ink-act="shrink" class="ink-grow ink-shrink"></button>
         <button data-ink-act="grow" class="ink-grow"></button>
+        <span class="ink-sep"></span>
+        <button data-ink-act="up" title="필기 블록을 위로 이동 (위 문단과 자리 바꿈)">▲</button>
+        <button data-ink-act="down" title="필기 블록을 아래로 이동 (아래 문단과 자리 바꿈)">▼</button>
         <button data-ink-act="done" class="ink-done">완료</button>
       </div>
       <div class="ink-stage">
@@ -154,6 +157,8 @@ class DrawingView {
     if (act === 'redo') this.redo();
     if (act === 'grow') this.grow();
     if (act === 'shrink') this.shrink();
+    if (act === 'up') return this.moveBlock(-1);
+    if (act === 'down') return this.moveBlock(1);
     if (act === 'done') return this.deactivate();
     views.forEach((v) => v.renderBar());
   }
@@ -438,6 +443,37 @@ class DrawingView {
       });
     }
     this.options.onInk?.();
+  }
+
+  /* ───── 블록 위치 이동 (위·아래 문단과 자리 바꿈) ───── */
+  async moveBlock(dir) {
+    const pos = this.getPos();
+    if (typeof pos !== 'number') return;
+    const { state } = this.editor.view;
+    const node = state.doc.nodeAt(pos);
+    const $p = state.doc.resolve(pos);
+    const idx = $p.index();
+    const parent = $p.parent;
+    let tr;
+    if (dir < 0) {
+      if (idx === 0) return;
+      const prev = parent.child(idx - 1);
+      tr = state.tr.delete(pos, pos + node.nodeSize).insert(pos - prev.nodeSize, node);
+    } else {
+      if (idx >= parent.childCount - 1) return;
+      const next = parent.child(idx + 1);
+      tr = state.tr.delete(pos, pos + node.nodeSize).insert(pos + next.nodeSize, node);
+    }
+    await this.flush(); // 옮기는 동안 쓰던 획을 먼저 저장
+    const id = this.node.attrs.drawingId;
+    this.editor.view.dispatch(tr);
+    // 자리를 옮기면 블록이 새로 그려지므로 다시 활성화하고 화면에 보이게
+    setTimeout(() => {
+      const v = views.get(id);
+      if (!v) return;
+      v.activate();
+      v.dom.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }, 0);
   }
 
   /* ───── 영역 크기 ───── */

@@ -228,3 +228,52 @@ export async function migrateLocal(all, onProgress) {
 export function skipMigration() {
   try { localStorage.setItem(migratedKey(), 'skipped'); } catch { /* 무시 */ }
 }
+
+/* ───────── 백업·복원 ───────── */
+const toB64 = (u8) => {
+  let s = '';
+  for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode(...u8.subarray(i, i + 0x8000));
+  return btoa(s);
+};
+const fromB64 = (b64) => Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+
+/** 계정의 모든 데이터를 파일 하나로 (그림은 base64) */
+export async function exportAllCloud() {
+  const all = async (name) => (await getDocs(col(name))).docs.map((d) => ({ ...d.data(), id: d.id }));
+  const [folders, notesRaw, chunks, imagesRaw] = await Promise.all([all('folders'), all('notes'), all('chunks'), all('images')]);
+  const settingsDoc = await getDoc(ref('settings', 'app'));
+  const notes = notesRaw.map(({ contentJson, ...n }) => {
+    let content = null;
+    try { content = contentJson ? JSON.parse(contentJson) : null; } catch { /* 무시 */ }
+    return { ...n, content };
+  });
+  const images = imagesRaw.map(({ data, ...img }) => ({ ...img, dataB64: data ? toB64(data.toUint8Array()) : '' }));
+  return {
+    app: 'YB-EverNote',
+    format: 1,
+    exportedAt: new Date().toISOString(),
+    folders,
+    notes,
+    chunks,
+    images,
+    settings: settingsDoc.exists() ? settingsDoc.data().value : null,
+  };
+}
+
+/** 백업 파일 복원: 같은 ID는 덮어쓰고, 백업 이후 새로 만든 것은 그대로 둠 */
+export async function importAll(data) {
+  const ops = [];
+  (data.folders || []).forEach(({ id, ...r }) => ops.push(['folders', id, clean(r)]));
+  (data.notes || []).forEach((n) => ops.push(['notes', n.id, noteToDoc(n)]));
+  (data.chunks || []).forEach(({ id, ...r }) => ops.push(['chunks', id, clean(r)]));
+  if (data.settings) ops.push(['settings', 'app', { value: clean(data.settings), updatedAt: Date.now() }]);
+  for (let i = 0; i < ops.length; i += 200) {
+    const batch = writeBatch(fs);
+    ops.slice(i, i + 200).forEach(([c, id, d]) => batch.set(ref(c, id), d));
+    batch.commit().catch(report('복원'));
+  }
+  for (const { id, dataB64, ...meta } of data.images || []) {
+    if (!dataB64) continue;
+    setDoc(ref('images', id), { ...clean(meta), data: Bytes.fromUint8Array(fromB64(dataB64)) }).catch(report('그림 복원'));
+  }
+}
