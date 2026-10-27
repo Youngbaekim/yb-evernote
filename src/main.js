@@ -1,11 +1,12 @@
 import './style.css';
+import { getTheme, setTheme } from './theme.js';
 import * as store from './store.js';
 import { signIn, signOutUser, watchAuth, finishRedirect } from './firebase.js';
 import { createEditor, toStorableJSON, hydrateJSON, setSearchTerm, FONTS, SIZES, HIGHLIGHTS, TEXT_COLORS } from './editor.js';
 import { newDrawingAttrs, flushAllDrawings, getDrawingView } from './drawing.js';
 import { makeSortable } from './sortable.js';
 
-const VERSION = 'v0.5.3 · 5단계';
+const VERSION = 'v0.5.4 · 5단계';
 const $ = (sel) => document.querySelector(sel);
 const app = $('#app');
 
@@ -871,6 +872,8 @@ $('#btn-fav').addEventListener('click', toggleFav);
 $('#btn-delete').addEventListener('click', deleteNote);
 $('#btn-lock').addEventListener('click', toggleLock);
 $('#btn-print').addEventListener('click', printNote);
+$('#sel-theme').value = getTheme();
+$('#sel-theme').addEventListener('change', (e) => setTheme(e.target.value));
 $('#sel-move').addEventListener('change', (e) => moveNote(e.target.value));
 $('#sel-bg').addEventListener('change', (e) => setNoteBackground(e.target.value));
 $('#sel-sort').addEventListener('change', (e) => {
