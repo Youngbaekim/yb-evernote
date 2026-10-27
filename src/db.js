@@ -3,18 +3,27 @@
 import { openDB } from 'idb';
 
 const DB_NAME = 'yb-evernote';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 let dbPromise;
 function db() {
   if (!dbPromise) {
     dbPromise = openDB(DB_NAME, DB_VERSION, {
-      upgrade(d) {
-        d.createObjectStore('folders', { keyPath: 'id' });
-        const notes = d.createObjectStore('notes', { keyPath: 'id' });
-        notes.createIndex('folderId', 'folderId');
-        const images = d.createObjectStore('images', { keyPath: 'id' });
-        images.createIndex('noteId', 'noteId');
+      upgrade(d, oldVersion) {
+        if (oldVersion < 1) {
+          d.createObjectStore('folders', { keyPath: 'id' });
+          const notes = d.createObjectStore('notes', { keyPath: 'id' });
+          notes.createIndex('folderId', 'folderId');
+          const images = d.createObjectStore('images', { keyPath: 'id' });
+          images.createIndex('noteId', 'noteId');
+        }
+        if (oldVersion < 2) {
+          // 2단계: 필기 획 묶음(chunk)과 설정
+          const chunks = d.createObjectStore('chunks', { keyPath: 'id' });
+          chunks.createIndex('drawingId', 'drawingId');
+          chunks.createIndex('noteId', 'noteId');
+          d.createObjectStore('settings', { keyPath: 'key' });
+        }
       },
     });
   }
@@ -61,9 +70,11 @@ export async function saveNote(note) {
 /** 영구 삭제: 노트와 그 노트의 그림을 함께 삭제 */
 export async function purgeNote(id) {
   const d = await db();
-  const tx = d.transaction(['notes', 'images'], 'readwrite');
+  const tx = d.transaction(['notes', 'images', 'chunks'], 'readwrite');
   const imgs = await tx.objectStore('images').index('noteId').getAllKeys(id);
   for (const k of imgs) await tx.objectStore('images').delete(k);
+  const chs = await tx.objectStore('chunks').index('noteId').getAllKeys(id);
+  for (const k of chs) await tx.objectStore('chunks').delete(k);
   await tx.objectStore('notes').delete(id);
   await tx.done;
 }
@@ -80,4 +91,25 @@ export async function getImage(id) {
 export async function imageUsage() {
   const all = await (await db()).getAll('images');
   return { count: all.length, bytes: all.reduce((s, i) => s + (i.size || 0), 0) };
+}
+
+/* ── 필기 획 묶음 ── */
+export async function putChunk(chunk) {
+  await (await db()).put('chunks', chunk);
+  return chunk;
+}
+export async function listChunks(drawingId) {
+  const all = await (await db()).getAllFromIndex('chunks', 'drawingId', drawingId);
+  return all.sort((a, b) => a.createdAt - b.createdAt || a.seq - b.seq);
+}
+
+/* ── 설정 ── */
+export const DEFAULT_SETTINGS = { paper: 'infinite', background: 'lined' };
+export async function getSettings() {
+  const rec = await (await db()).get('settings', 'app');
+  return { ...DEFAULT_SETTINGS, ...(rec?.value || {}) };
+}
+export async function saveSettings(value) {
+  await (await db()).put('settings', { key: 'app', value, updatedAt: Date.now() });
+  return value;
 }

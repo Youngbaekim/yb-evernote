@@ -1,8 +1,9 @@
 import './style.css';
 import * as store from './db.js';
 import { createEditor, toStorableJSON, hydrateJSON, FONTS, SIZES, HIGHLIGHTS } from './editor.js';
+import { newDrawingAttrs, flushAllDrawings, getDrawingView } from './drawing.js';
 
-const VERSION = 'v0.1.0 · 1단계';
+const VERSION = 'v0.2.0 · 2단계';
 const $ = (sel) => document.querySelector(sel);
 const app = $('#app');
 
@@ -12,6 +13,7 @@ const state = {
   filter: 'all', // all | fav | trash | <folderId>
   search: '',
   noteId: null,
+  settings: { paper: 'infinite', background: 'lined' },
 };
 
 /* ───────── 공통 도구 ───────── */
@@ -38,14 +40,16 @@ let dirty = false;
 const editor = createEditor($('#editor'), {
   onUpdate: () => scheduleSave(),
   getNoteId: () => state.noteId,
+  onInk: () => scheduleSave(true),
 });
 
 function setSaveState(text) {
   $('#save-state').textContent = text;
 }
 
-function scheduleSave() {
+function scheduleSave(force = false) {
   if (!state.noteId) return;
+  if (force === true) dirty = true;
   dirty = true;
   setSaveState('저장 중…');
   clearTimeout(saveTimer);
@@ -69,6 +73,7 @@ async function flushSave() {
 }
 
 async function openNote(id) {
+  await flushAllDrawings();
   await flushSave();
   state.noteId = id;
   const note = current();
@@ -213,6 +218,7 @@ function updateToolbar() {
   document.querySelectorAll('[data-hl]').forEach((b) => b.classList.toggle('active', !!hl && b.dataset.hl === hl));
 }
 window.__ybEditor = editor; // 점검용
+window.__ybDrawing = getDrawingView; // 점검용
 editor.on('selectionUpdate', updateToolbar);
 editor.on('transaction', updateToolbar);
 
@@ -228,11 +234,21 @@ function runCmd(cmd) {
     bullet: () => c.toggleBulletList(),
     ordered: () => c.toggleOrderedList(),
     task: () => c.toggleTaskList(),
+    drawing: () => c.insertContent([{ type: 'drawing', attrs: newDrawingAttrs(state.settings) }, { type: 'paragraph' }]),
     undo: () => c.undo(),
     redo: () => c.redo(),
   };
   if (cmd === 'image') return $('#file-image').click();
   map[cmd]?.().run();
+  if (cmd === 'drawing') {
+    // 방금 넣은 필기 블록을 바로 쓸 수 있게 활성화
+    const { $from } = editor.state.selection;
+    let id = null;
+    editor.state.doc.nodesBetween(Math.max(0, $from.pos - 4), $from.pos, (n) => {
+      if (n.type.name === 'drawing') id = n.attrs.drawingId;
+    });
+    if (id) setTimeout(() => getDrawingView(id)?.activate(), 0);
+  }
 }
 
 /* ───────── 동작 ───────── */
@@ -347,6 +363,24 @@ async function refreshUsage() {
   $('#usage').textContent = u.count ? ` · 그림 ${u.count}장 ${(u.bytes / 1048576).toFixed(1)}MB` : '';
 }
 
+/* ───────── 설정 ───────── */
+function openSettings() {
+  const s = state.settings;
+  const dlg = $('#settings');
+  dlg.querySelector(`[name=paper][value=${s.paper}]`).checked = true;
+  dlg.querySelector(`[name=background][value=${s.background}]`).checked = true;
+  dlg.showModal();
+}
+$('#settings').addEventListener('close', async () => {
+  const dlg = $('#settings');
+  if (dlg.returnValue !== 'save') return;
+  state.settings = {
+    paper: dlg.querySelector('[name=paper]:checked').value,
+    background: dlg.querySelector('[name=background]:checked').value,
+  };
+  await store.saveSettings(state.settings);
+});
+
 /* ───────── 이벤트 연결 ───────── */
 document.addEventListener('click', async (e) => {
   const t = e.target;
@@ -379,6 +413,7 @@ document.addEventListener('click', async (e) => {
       ? editor.chain().focus().toggleHighlight({ color }).run()
       : editor.chain().focus().unsetHighlight().run();
   }
+  if (t.closest('#btn-settings')) return openSettings();
   if (t.closest('#btn-restore')) return restoreNote();
   if (t.closest('#btn-purge')) return purgeNote();
 });
@@ -420,7 +455,7 @@ $('#file-image').addEventListener('change', (e) => {
 
 // 창을 닫거나 백그라운드로 갈 때 저장
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'hidden') flushSave();
+  if (document.visibilityState === 'hidden') { flushAllDrawings(); flushSave(); }
 });
 window.addEventListener('pagehide', flushSave);
 
@@ -428,6 +463,7 @@ window.addEventListener('pagehide', flushSave);
 (async () => {
   $('#version').textContent = VERSION;
   buildToolbar();
+  state.settings = await store.getSettings();
   await reload();
   renderList();
   renderEditorHeader();

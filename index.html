@@ -23,7 +23,7 @@
         <span class="brand">YB-EverNote</span>
       </header>
       <nav id="folder-nav" class="folder-nav"></nav>
-      <footer class="pane-foot"><span id="version"></span><span id="usage"></span></footer>
+      <footer class="pane-foot"><button class="btn-settings" id="btn-settings" title="설정">⚙ 설정</button><span><span id="version"></span><span id="usage"></span></span></footer>
     </aside>
     <div class="scrim" data-go="list"></div>
 
@@ -67,6 +67,7 @@
         <span class="sep"></span>
         <span id="hl-group" class="hl-group" title="형광펜"></span>
         <span class="sep"></span>
+        <button class="tool" data-cmd="drawing" title="필기 넣기 (펜·손가락으로 쓰기)">✒</button>
         <button class="tool" data-cmd="image" title="그림 넣기 (붙여넣기·끌어놓기도 가능)">🖼</button>
         <input id="file-image" type="file" accept="image/*" multiple hidden />
         <span class="sep"></span>
@@ -82,6 +83,26 @@
       </div>
     </main>
   </div>
+  <dialog id="settings" class="settings">
+    <form method="dialog">
+      <h3>설정</h3>
+      <fieldset>
+        <legend>필기 종이 형태 <small>(새로 넣는 필기 블록부터 적용)</small></legend>
+        <label><input type="radio" name="paper" value="infinite" /> 세로로 무한히 늘어남</label>
+        <label><input type="radio" name="paper" value="a4" /> A4 쪽 단위</label>
+      </fieldset>
+      <fieldset>
+        <legend>필기 기본 배경 <small>(블록마다 바꿀 수 있음)</small></legend>
+        <label><input type="radio" name="background" value="lined" /> 줄노트</label>
+        <label><input type="radio" name="background" value="blank" /> 무지</label>
+        <label><input type="radio" name="background" value="grid" /> 모눈</label>
+      </fieldset>
+      <div class="dlg-actions">
+        <button value="cancel" class="btn-text">취소</button>
+        <button value="save" class="btn-primary">저장</button>
+      </div>
+    </form>
+  </dialog>
   <script type="module" src="/src/main.js"></script>
 </body>
 </html>

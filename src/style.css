@@ -164,3 +164,45 @@ button:disabled { cursor: default; opacity: .4; }
   .editor { padding: 16px 16px 120px; }
   .save-state { display: none; }
 }
+
+/* ───────── 2단계: 필기 블록 ───────── */
+.pane-foot { display: flex; flex-direction: column; gap: 6px; }
+.btn-settings { align-self: flex-start; padding: 5px 8px; border-radius: 6px; font-size: 13px; color: var(--soft); }
+.btn-settings:hover { background: var(--accent-soft); color: var(--accent); }
+
+.drawing-block { position: relative; margin: .8em 0; border: 1px solid var(--line); border-radius: 10px; overflow: clip; background: #fffdf8; user-select: none; }
+.drawing-block.active { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.drawing-block.ProseMirror-selectednode { outline: 3px solid var(--accent); }
+.ink-bar { display: none; align-items: center; gap: 2px; padding: 5px 8px; background: var(--pane); border-bottom: 1px solid var(--line); overflow-x: auto; position: sticky; top: 0; z-index: 2; }
+.drawing-block.active .ink-bar { display: flex; }
+.ink-bar button { min-width: 32px; height: 32px; border-radius: 8px; font-size: 15px; flex: none; display: inline-grid; place-items: center; }
+.ink-bar button:hover { background: var(--accent-soft); }
+.ink-bar button.on { background: var(--accent); color: #fff; }
+.ink-group { display: inline-flex; gap: 2px; align-items: center; flex: none; }
+.ink-sep { width: 1px; height: 20px; margin: 0 4px; background: var(--line); flex: none; }
+.ink-bar .swatch { min-width: 24px; width: 24px; height: 24px; border-radius: 50%; background: var(--c); border: 2px solid transparent; }
+.ink-bar .swatch.on { background: var(--c); border-color: var(--ink); box-shadow: 0 0 0 2px var(--pane) inset; }
+.dot { display: block; border-radius: 50%; background: currentColor; }
+.dot.s1 { width: 4px; height: 4px; } .dot.s2 { width: 7px; height: 7px; } .dot.s3 { width: 11px; height: 11px; }
+.ink-bg { padding: 4px 6px; border: 1px solid var(--line); border-radius: 8px; background: var(--pane); font-size: 13px; flex: none; }
+.ink-grow { padding: 0 8px !important; font-size: 13px !important; white-space: nowrap; }
+.ink-done { margin-left: auto; padding: 0 12px !important; font-size: 13px !important; font-weight: 600; background: var(--accent) !important; color: #fff; }
+.ink-stage { position: relative; width: 100%; }
+.ink-stage canvas { position: absolute; left: 0; top: 0; display: block; }
+.drawing-block.active .ink-live { touch-action: none; cursor: crosshair; }
+.drawing-block.active .ink-stage.eraser .ink-live { cursor: cell; }
+.drawing-block.active .ink-stage.hand .ink-live { cursor: grab; }
+.ink-hint { position: absolute; left: 50%; top: 18px; transform: translateX(-50%); padding: 4px 10px; border-radius: 12px; font-size: 12px; color: #5a6774; background: rgba(255,255,255,.85); pointer-events: none; }
+.drawing-block.active .ink-hint, .drawing-block.has-ink .ink-hint { display: none; }
+@media (prefers-color-scheme: dark) { .ink-bar button.on, .ink-done { color: #10151c; } }
+
+/* 설정 창 */
+.settings { border: 1px solid var(--line); border-radius: 14px; padding: 20px 22px; background: var(--pane); color: var(--ink); width: min(420px, calc(100vw - 32px)); }
+.settings::backdrop { background: rgba(0,0,0,.35); }
+.settings h3 { margin: 0 0 12px; font-size: 17px; }
+.settings fieldset { border: 1px solid var(--line); border-radius: 10px; margin: 0 0 12px; padding: 10px 14px 12px; }
+.settings legend { font-size: 13px; font-weight: 600; padding: 0 4px; }
+.settings legend small { font-weight: 400; color: var(--soft); }
+.settings label { display: flex; align-items: center; gap: 8px; padding: 5px 0; font-size: 14px; }
+.settings input[type=radio] { accent-color: var(--accent); }
+.dlg-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; }

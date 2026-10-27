@@ -7,6 +7,7 @@ import { TaskList, TaskItem } from '@tiptap/extension-list';
 import Image from '@tiptap/extension-image';
 import { Placeholder } from '@tiptap/extensions';
 import { compressImage } from './image.js';
+import { Drawing } from './drawing.js';
 import { putImage, getImage, newId } from './db.js';
 
 export const FONTS = [
@@ -102,9 +103,9 @@ const imageFiles = (list) => [...(list || [])].filter((f) => f.type.startsWith('
 
 /**
  * @param {HTMLElement} element 편집 영역
- * @param {{ onUpdate: () => void, getNoteId: () => string }} opts
+ * @param {{ onUpdate: () => void, getNoteId: () => string, onInk: () => void }} opts
  */
-export function createEditor(element, { onUpdate, getNoteId }) {
+export function createEditor(element, { onUpdate, getNoteId, onInk }) {
   const editor = new Editor({
     element,
     extensions: [
@@ -116,6 +117,7 @@ export function createEditor(element, { onUpdate, getNoteId }) {
       TaskList,
       TaskItem.configure({ nested: true }),
       NoteImage.configure({ resize: { enabled: true, minWidth: 60, alwaysPreserveAspectRatio: true, directions: ['bottomRight', 'bottomLeft'] } }),
+      Drawing.configure({ getNoteId, onInk }),
       Placeholder.configure({ placeholder: '내용을 입력하세요. 그림은 Ctrl+V로 붙여 넣을 수 있습니다.' }),
     ],
     editorProps: {
