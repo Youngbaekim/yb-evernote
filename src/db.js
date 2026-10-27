@@ -104,7 +104,7 @@ export async function listChunks(drawingId) {
 }
 
 /* ── 설정 ── */
-export const DEFAULT_SETTINGS = { paper: 'infinite', background: 'lined' };
+export const DEFAULT_SETTINGS = { paper: 'infinite', background: 'lined', textBackground: 'lined' };
 export async function getSettings() {
   const rec = await (await db()).get('settings', 'app');
   return { ...DEFAULT_SETTINGS, ...(rec?.value || {}) };

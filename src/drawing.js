@@ -8,6 +8,7 @@ import {
 
 const INFINITE_START = 600;
 const INFINITE_STEP = 400;
+const MIN_HEIGHT = 200; // 무한 종이의 최소 높이
 const FLUSH_DELAY = 2000; // 펜을 2초 떼면 묶음 저장
 const MAX_CHUNK_CHARS = 450_000; // 묶음 1건 약 500KB 이하
 const PAPER_INK = { line: '#D6DCE4', page: '#9AA5B0' };
@@ -91,6 +92,7 @@ class DrawingView {
         <span class="ink-sep"></span>
         <button data-ink-act="undo" title="실행 취소 (Ctrl+Z)">↶</button>
         <button data-ink-act="redo" title="다시 실행 (Ctrl+Y)">↷</button>
+        <button data-ink-act="shrink" class="ink-grow ink-shrink"></button>
         <button data-ink-act="grow" class="ink-grow"></button>
         <button data-ink-act="done" class="ink-done">완료</button>
       </div>
@@ -133,8 +135,14 @@ class DrawingView {
     this.bar.querySelectorAll('[data-ink-size]').forEach((b) => b.classList.toggle('on', b.dataset.inkSize === ink.size));
     this.bar.querySelector('.ink-colors').style.display = ink.tool === 'eraser' || ink.tool === 'hand' ? 'none' : '';
     this.bgSel.value = this.node.attrs.background;
-    this.bar.querySelector('.ink-grow').textContent = this.node.attrs.paper === 'a4' ? '＋ 쪽' : '↧ 늘리기';
-    this.bar.querySelector('.ink-grow').title = this.node.attrs.paper === 'a4' ? 'A4 쪽 추가' : '필기 영역 늘리기';
+    const a4 = this.node.attrs.paper === 'a4';
+    const growBtn = this.bar.querySelector('[data-ink-act="grow"]');
+    const shrinkBtn = this.bar.querySelector('[data-ink-act="shrink"]');
+    growBtn.textContent = a4 ? '＋ 쪽' : '↧ 늘리기';
+    growBtn.title = a4 ? 'A4 쪽 추가' : '필기 영역 늘리기';
+    shrinkBtn.textContent = a4 ? '－ 쪽' : '↥ 줄이기';
+    shrinkBtn.title = a4 ? '마지막 쪽 삭제(빈 쪽만)' : '필기 영역 줄이기(아래쪽 빈 공간만)';
+    shrinkBtn.disabled = this.shrinkTarget() === null;
     this.stage.classList.toggle('eraser', ink.tool === 'eraser');
     this.stage.classList.toggle('hand', ink.tool === 'hand');
   }
@@ -152,6 +160,7 @@ class DrawingView {
     if (act === 'undo') this.undo();
     if (act === 'redo') this.redo();
     if (act === 'grow') this.grow();
+    if (act === 'shrink') this.shrink();
     if (act === 'done') return this.deactivate();
     views.forEach((v) => v.renderBar());
   }
@@ -204,6 +213,8 @@ class DrawingView {
     for (const s of this.strokes.values()) if (s.tool === 'highlighter') this.paintStroke(ctx, s);
     for (const s of this.strokes.values()) if (s.tool !== 'highlighter') this.paintStroke(ctx, s);
     this.dom.classList.toggle('has-ink', this.strokes.size > 0);
+    const sb = this.bar?.querySelector('[data-ink-act="shrink"]');
+    if (sb) sb.disabled = this.shrinkTarget() === null;
   }
 
   /* ───── 기록 불러오기 ───── */
@@ -322,6 +333,7 @@ class DrawingView {
     this.dom.classList.add('has-ink');
     this.commit({ type: 'add', strokes: [s] });
     this.autoGrow(s.bounds.maxY);
+    this.renderBar();
   }
 
   drawLive() {
@@ -436,6 +448,25 @@ class DrawingView {
   grow() {
     const step = this.node.attrs.paper === 'a4' ? A4_PAGE_H : INFINITE_STEP;
     this.setAttrs({ height: this.heightUnits + step });
+  }
+
+  /** 줄일 수 있는 높이 (필기가 있는 곳 아래 빈 공간만 줄임). 줄일 수 없으면 null */
+  shrinkTarget() {
+    const h = this.heightUnits;
+    let maxY = 0;
+    for (const s of this.strokes.values()) maxY = Math.max(maxY, s.bounds.maxY);
+    if (this.node.attrs.paper === 'a4') {
+      const next = h - A4_PAGE_H;
+      return next >= A4_PAGE_H && maxY <= next ? next : null;
+    }
+    const floor = Math.max(MIN_HEIGHT, Math.ceil(maxY + 40));
+    const next = Math.max(floor, h - INFINITE_STEP);
+    return next < h ? next : null;
+  }
+
+  shrink() {
+    const next = this.shrinkTarget();
+    if (next !== null) this.setAttrs({ height: next });
   }
 
   autoGrow(maxY) {
