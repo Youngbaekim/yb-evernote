@@ -51,7 +51,8 @@ button:disabled { cursor: default; opacity: .4; }
 .pane-folders { background: var(--side); }
 .pane-head { display: flex; align-items: center; gap: 6px; min-height: 52px; padding: 8px 12px; border-bottom: 1px solid var(--line); }
 .pane-head h1 { flex: 1; margin: 0; font-size: 16px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.brand { font-weight: 800; color: var(--accent); letter-spacing: .02em; }
+.brand { display: inline-flex; align-items: center; gap: 8px; font-weight: 800; color: var(--accent); letter-spacing: .02em; }
+.brand-icon { display: block; border-radius: 6px; flex: none; }
 .pane-foot { margin-top: auto; padding: 10px 14px; font-size: 12px; color: var(--soft); border-top: 1px solid var(--line); }
 .scrim { display: none; }
 

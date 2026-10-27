@@ -7,7 +7,8 @@
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-title" content="YB노트" />
   <link rel="manifest" href="manifest.webmanifest" />
-  <link rel="icon" type="image/png" href="icons/icon-192.png" />
+  <link rel="icon" type="image/svg+xml" href="icons/icon.svg" />
+  <link rel="icon" type="image/png" sizes="64x64" href="icons/favicon-64.png" />
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -20,7 +21,7 @@
     <!-- 1열: 폴더 -->
     <aside class="pane pane-folders" aria-label="폴더">
       <header class="pane-head">
-        <span class="brand">YB-EverNote</span>
+        <span class="brand"><img class="brand-icon" src="icons/icon.svg" alt="" width="26" height="26" />YB-EverNote</span>
       </header>
       <nav id="folder-nav" class="folder-nav"></nav>
       <footer class="pane-foot"><span id="sync" class="sync" data-s="pending">● 연결 중…</span><span id="account" class="account"></span><button class="btn-settings" id="btn-settings" title="설정">⚙ 설정</button><span><span id="version"></span><span id="usage"></span></span></footer>
@@ -91,7 +92,7 @@
   </div>
   <div id="login" class="login">
     <div class="login-card">
-      <img src="icons/icon-192.png" alt="" width="72" height="72" />
+      <img src="icons/icon.svg" alt="" width="72" height="72" />
       <h2>YB-EverNote</h2>
       <p>Google 계정으로 로그인하면<br />PC·태블릿·휴대폰에서 같은 노트를 쓸 수 있습니다.</p>
       <button id="btn-signin" class="btn-primary btn-signin">Google 계정으로 로그인</button>
