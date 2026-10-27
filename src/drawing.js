@@ -70,10 +70,10 @@ class DrawingView {
     dom.innerHTML = `
       <div class="ink-bar">
         <div class="ink-group">
-          <button data-ink-tool="pen" title="펜">✒</button>
-          <button data-ink-tool="highlighter" title="형광펜">🖍</button>
-          <button data-ink-tool="eraser" title="지우개(획 단위)">⌫</button>
-          <button data-ink-tool="hand" title="화면 이동(손가락으로 넘기기)">✋</button>
+          <button data-ink-tool="pen" class="ink-tool" title="펜">✒<span>펜</span></button>
+          <button data-ink-tool="eraser" class="ink-tool" title="지우개 — 닿은 획을 통째로 지움 (펜 옆 버튼을 누른 채 써도 지우개)"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><g transform="rotate(45 12 12)"><rect x="7.5" y="3" width="9" height="18" rx="2.2"/><path d="M7.5 15h9"/></g></svg><span>지우개</span></button>
+          <button data-ink-tool="highlighter" class="ink-tool" title="형광펜">🖍<span>형광펜</span></button>
+          <button data-ink-tool="hand" class="ink-tool" title="화면 이동(손가락으로 넘기기)">✋<span>이동</span></button>
         </div>
         <span class="ink-sep"></span>
         <div class="ink-group ink-colors"></div>
@@ -275,7 +275,9 @@ class DrawingView {
     e.preventDefault();
     try { this.live.setPointerCapture(e.pointerId); } catch { /* 무시 */ }
     const [x, y] = this.toUnits(e);
-    if (ink.tool === 'eraser') {
+    // 펜 뒤쪽 지우개(eraser 버튼) 또는 펜 옆 버튼을 누른 채 쓰면 임시 지우개
+    const penEraser = e.pointerType === 'pen' && ((e.buttons & 32) || (e.buttons & 2) || e.button === 5 || e.button === 2);
+    if (ink.tool === 'eraser' || penEraser) {
       this.current = { id: e.pointerId, eraser: true, removed: [] };
       this.eraseAt(x, y);
       return;

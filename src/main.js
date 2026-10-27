@@ -12,8 +12,9 @@ const state = {
   notes: [],
   filter: 'all', // all | fav | trash | <folderId>
   search: '',
+  tag: '', // 해시태그 필터 (# 없이)
   noteId: null,
-  settings: { paper: 'infinite', background: 'lined' },
+  settings: { paper: 'infinite', background: 'lined', textBackground: 'lined' },
 };
 
 /* ───────── 공통 도구 ───────── */
@@ -31,7 +32,11 @@ function fmtDate(ts) {
 }
 
 const current = () => state.notes.find((n) => n.id === state.noteId) || null;
-const titleOf = (n) => n.title?.trim() || n.preview?.split('\n')[0]?.slice(0, 40) || '제목 없음';
+/* 해시태그: 제목 속 '#단어' (한글·영문·숫자·_·-) */
+const TAG_RE = /#([\p{L}\p{N}_-]+)/gu;
+const tagsOf = (title) => [...new Set([...(title || '').matchAll(TAG_RE)].map((m) => m[1]))];
+const stripTags = (title) => (title || '').replace(TAG_RE, '').replace(/\s{2,}/g, ' ').trim();
+const titleOf = (n) => stripTags(n.title) || n.preview?.split('\n')[0]?.slice(0, 40) || '제목 없음';
 
 /* ───────── 편집기 ───────── */
 let saveTimer = null;
@@ -63,6 +68,7 @@ async function flushSave() {
   const note = current();
   if (!note) return;
   note.title = $('#note-title').value;
+  note.tags = tagsOf(note.title);
   note.content = toStorableJSON(editor.getJSON());
   note.preview = editor.getText({ blockSeparator: '\n' }).trim().slice(0, 120);
   note.updatedAt = Date.now();
@@ -103,9 +109,26 @@ function visibleNotes() {
     if (state.filter === 'fav') list = list.filter((n) => n.fav);
     else if (state.filter !== 'all') list = list.filter((n) => n.folderId === state.filter);
   }
+  if (state.tag) list = list.filter((n) => tagsOf(n.title).includes(state.tag));
   const q = state.search.trim().toLowerCase();
   if (q) list = list.filter((n) => titleOf(n).toLowerCase().includes(q) || (n.preview || '').toLowerCase().includes(q));
   return list;
+}
+
+function renderTagSelect() {
+  const count = new Map();
+  for (const n of state.notes) {
+    if (n.trashedAt) continue;
+    for (const t of tagsOf(n.title)) count.set(t, (count.get(t) || 0) + 1);
+  }
+  const tags = [...count.keys()].sort((a, b) => a.localeCompare(b, 'ko'));
+  if (state.tag && !count.has(state.tag)) tags.unshift(state.tag);
+  const sel = $('#sel-tag');
+  sel.innerHTML =
+    `<option value="">#태그 전체</option>` +
+    tags.map((t) => `<option value="${esc(t)}">#${esc(t)} (${count.get(t) || 0})</option>`).join('');
+  sel.value = state.tag;
+  sel.classList.toggle('on', !!state.tag);
 }
 
 function filterName() {
@@ -141,7 +164,8 @@ function renderFolders() {
 }
 
 function renderList() {
-  $('#list-title').textContent = filterName();
+  $('#list-title').textContent = filterName() + (state.tag ? ` · #${state.tag}` : '');
+  renderTagSelect();
   $('#btn-new').hidden = state.filter === 'trash';
   const notes = visibleNotes();
   const empty = state.filter === 'trash' ? '휴지통이 비어 있습니다.' : '노트가 없습니다. ＋ 새 노트를 눌러 시작하세요.';
@@ -151,7 +175,7 @@ function renderList() {
           (n) => `
       <li>
         <button class="note-card ${state.noteId === n.id ? 'active' : ''}" data-note="${n.id}">
-          <span class="nc-title">${n.fav ? '<span class="star">★</span> ' : ''}${esc(titleOf(n))}</span>
+          <span class="nc-title">${n.fav ? '<span class="star">★</span> ' : ''}${esc(titleOf(n))}${tagsOf(n.title).map((t) => `<span class="tag-chip" data-tag="${esc(t)}">#${esc(t)}</span>`).join('')}</span>
           <span class="nc-preview">${esc((n.preview || '').replace(/\n+/g, ' ').slice(0, 70))}</span>
           <span class="nc-meta">${fmtDate(n.updatedAt)}${n.folderId && state.filter === 'all' ? ' · ' + esc(state.folders.find((f) => f.id === n.folderId)?.name ?? '') : ''}</span>
         </button>
@@ -174,6 +198,10 @@ function renderEditorHeader() {
   $('#btn-delete').disabled = !has;
   $('#btn-delete').title = trashed ? '영구 삭제' : '휴지통으로';
   $('#sel-move').disabled = !has || trashed;
+  $('#sel-bg').disabled = !has || trashed;
+  const bg = note?.background ?? state.settings.textBackground; // 배경을 정하지 않은 노트는 설정의 기본 배경
+  $('#sel-bg').value = bg;
+  $('#editor').dataset.bg = bg;
   $('#sel-move').innerHTML =
     `<option value="">미분류</option>` +
     state.folders.map((f) => `<option value="${f.id}">${esc(f.name)}</option>`).join('');
@@ -266,6 +294,7 @@ async function newNote() {
     title: '',
     folderId,
     fav: state.filter === 'fav',
+    background: state.settings.textBackground,
     content: null,
     preview: '',
     trashedAt: null,
@@ -320,6 +349,16 @@ async function toggleFav() {
   renderEditorHeader();
 }
 
+async function setNoteBackground(bg) {
+  const n = current();
+  if (!n) return;
+  n.background = bg;
+  n.updatedAt = Date.now();
+  await store.saveNote(n);
+  $('#editor').dataset.bg = bg;
+  renderList();
+}
+
 async function moveNote(folderId) {
   const n = current();
   if (!n) return;
@@ -369,6 +408,7 @@ function openSettings() {
   const dlg = $('#settings');
   dlg.querySelector(`[name=paper][value=${s.paper}]`).checked = true;
   dlg.querySelector(`[name=background][value=${s.background}]`).checked = true;
+  dlg.querySelector(`[name=textBackground][value=${s.textBackground}]`).checked = true;
   dlg.showModal();
 }
 $('#settings').addEventListener('close', async () => {
@@ -377,8 +417,10 @@ $('#settings').addEventListener('close', async () => {
   state.settings = {
     paper: dlg.querySelector('[name=paper]:checked').value,
     background: dlg.querySelector('[name=background]:checked').value,
+    textBackground: dlg.querySelector('[name=textBackground]:checked').value,
   };
   await store.saveSettings(state.settings);
+  renderEditorHeader();
 });
 
 /* ───────── 이벤트 연결 ───────── */
@@ -396,6 +438,12 @@ document.addEventListener('click', async (e) => {
   const menu = t.closest('[data-folder-menu]');
   if (menu) return folderMenu(menu.dataset.folderMenu);
   if (t.closest('#btn-add-folder')) return addFolder();
+  const chip = t.closest('.tag-chip');
+  if (chip) {
+    e.stopPropagation();
+    state.tag = chip.dataset.tag;
+    return renderList();
+  }
   const card = t.closest('[data-note]');
   if (card) return openNote(card.dataset.note);
   const go = t.closest('[data-go]');
@@ -427,6 +475,12 @@ $('#btn-new').addEventListener('click', newNote);
 $('#btn-fav').addEventListener('click', toggleFav);
 $('#btn-delete').addEventListener('click', deleteNote);
 $('#sel-move').addEventListener('change', (e) => moveNote(e.target.value));
+$('#sel-bg').addEventListener('change', (e) => setNoteBackground(e.target.value));
+$('#sel-tag').addEventListener('change', (e) => {
+  state.tag = e.target.value;
+  app.dataset.view = 'list';
+  renderList();
+});
 $('#note-title').addEventListener('input', scheduleSave);
 $('#note-title').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') {

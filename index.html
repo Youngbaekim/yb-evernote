@@ -47,6 +47,12 @@
         <input id="note-title" class="title-input" placeholder="제목" disabled />
         <span id="save-state" class="save-state"></span>
         <button class="icon-btn" id="btn-fav" title="즐겨찾기" disabled>☆</button>
+        <select id="sel-tag" class="sel-move sel-tag" title="해시태그로 노트 골라 보기 (제목에 #단어)"></select>
+        <select id="sel-bg" class="sel-move sel-bg" title="노트 배경" disabled>
+          <option value="lined">줄노트</option>
+          <option value="blank">무지</option>
+          <option value="grid">모눈</option>
+        </select>
         <select id="sel-move" class="sel-move" title="폴더 이동" disabled></select>
         <button class="icon-btn" id="btn-delete" title="휴지통으로" disabled>🗑</button>
       </header>
@@ -90,6 +96,12 @@
         <legend>필기 종이 형태 <small>(새로 넣는 필기 블록부터 적용)</small></legend>
         <label><input type="radio" name="paper" value="infinite" /> 세로로 무한히 늘어남</label>
         <label><input type="radio" name="paper" value="a4" /> A4 쪽 단위</label>
+      </fieldset>
+      <fieldset>
+        <legend>타이핑 기본 배경 <small>(새 노트부터 적용, 노트마다 바꿀 수 있음)</small></legend>
+        <label><input type="radio" name="textBackground" value="lined" /> 줄노트</label>
+        <label><input type="radio" name="textBackground" value="blank" /> 무지</label>
+        <label><input type="radio" name="textBackground" value="grid" /> 모눈</label>
       </fieldset>
       <fieldset>
         <legend>필기 기본 배경 <small>(블록마다 바꿀 수 있음)</small></legend>
