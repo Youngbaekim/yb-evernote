@@ -10,6 +10,7 @@ import Image from '@tiptap/extension-image';
 import { Placeholder } from '@tiptap/extensions';
 import { compressImage } from './image.js';
 import { Drawing } from './drawing.js';
+import { openCropper, rotatedURL } from './crop.js';
 import { putImage, getImage, newId } from './store.js';
 
 export const FONTS = [
@@ -59,20 +60,84 @@ class ImageView {
     const dom = document.createElement('div');
     dom.className = 'img-block';
     dom.contentEditable = 'false';
-    dom.innerHTML = `<div class="img-wrap"><img alt="" draggable="false" />${HANDLES.map((h) => `<span class="img-h" data-h="${h}"></span>`).join('')}</div>`;
+    dom.innerHTML = `<div class="img-wrap"><div class="img-clip"><img alt="" draggable="false" /></div>${HANDLES.map((h) => `<span class="img-h" data-h="${h}"></span>`).join('')}<div class="img-menu"><button data-im="crop" title="자르기·회전 (원본은 그대로 보관)">✂</button><button data-im="reset" title="원래대로 (자르기·회전 취소)">↺</button></div></div>`;
     this.dom = dom;
     this.wrap = dom.querySelector('.img-wrap');
+    this.clip = dom.querySelector('.img-clip');
     this.img = dom.querySelector('img');
     this.render();
     dom.querySelectorAll('.img-h').forEach((h) => h.addEventListener('pointerdown', (e) => this.start(e, h.dataset.h)));
+    dom.querySelector('.img-menu').addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); });
+    dom.querySelector('.img-menu').addEventListener('click', (e) => {
+      const act = e.target.closest('[data-im]')?.dataset.im;
+      if (act === 'crop') this.openCrop();
+      if (act === 'reset') this.resetCrop();
+    });
+    this.img.addEventListener('dblclick', () => this.openCrop());
+  }
+
+  get crop() {
+    const { cropX: x, cropY: y, cropW: w, cropH: h } = this.node.attrs;
+    return w && h ? { x, y, w, h } : null;
   }
 
   render() {
-    const { src, width, height } = this.node.attrs;
-    if (this.img.getAttribute('src') !== src) this.img.setAttribute('src', src || '');
+    const { src, width, height, rotate } = this.node.attrs;
+    const want = `${src}|${rotate || 0}`;
+    if (this.shown !== want) {
+      this.shown = want;
+      rotatedURL(src, rotate || 0).then((u) => { if (this.shown === want) this.img.setAttribute('src', u || ''); });
+    }
+    const c = this.crop;
+    this.dom.classList.toggle('edited', !!c || !!rotate);
     // 폭은 노트 폭을 넘지 않게, 비율은 aspect-ratio로 유지 (좁은 화면에서도 모양 그대로)
     this.wrap.style.width = width ? `${width}px` : '';
-    this.img.style.aspectRatio = width && height ? `${width} / ${height}` : '';
+    this.clip.style.aspectRatio = width && height ? `${width} / ${height}` : '';
+    this.clip.classList.toggle('sized', !!(width && height));
+    // 자르기: 원본을 확대·이동해 보여 줄 영역만 칸에 맞춤
+    const s = this.img.style;
+    if (c) {
+      s.width = `${100 / c.w}%`;
+      s.height = `${100 / c.h}%`;
+      s.left = `${(-c.x / c.w) * 100}%`;
+      s.top = `${(-c.y / c.h) * 100}%`;
+    } else {
+      s.width = s.height = s.left = s.top = '';
+    }
+  }
+
+  async openCrop() {
+    if (!this.editor.isEditable) return;
+    const boxW = this.clip.offsetWidth;
+    const boxH = this.clip.offsetHeight;
+    const res = await openCropper({ src: this.node.attrs.src, crop: this.crop, rotate: this.node.attrs.rotate || 0, boxW, boxH });
+    if (!res) return;
+    if (res.reset) return this.resetCrop(res.natAspect);
+    const W = this.node.attrs.width || boxW;
+    const H = res.mode === 'keep' ? (this.node.attrs.height || boxH) : W / res.aspectPx;
+    const c = res.crop;
+    this.setAttrs({
+      rotate: res.rotate || 0,
+      cropX: c ? c.x : null, cropY: c ? c.y : null, cropW: c ? c.w : null, cropH: c ? c.h : null,
+      width: Math.round(W), height: Math.round(H),
+    });
+  }
+
+  resetCrop(natAspect) {
+    const W = this.node.attrs.width || this.clip.offsetWidth;
+    let aspect = natAspect;
+    if (!aspect) {
+      // 원본 비율: 회전 전 그림 크기 기준
+      const n = this.img.naturalWidth && this.img.naturalHeight ? this.img.naturalWidth / this.img.naturalHeight : null;
+      aspect = n && (this.node.attrs.rotate || 0) % 180 ? 1 / n : n;
+    }
+    this.setAttrs({ rotate: 0, cropX: null, cropY: null, cropW: null, cropH: null, width: Math.round(W), height: aspect ? Math.round(W / aspect) : null });
+  }
+
+  setAttrs(attrs) {
+    const pos = this.getPos();
+    if (typeof pos !== 'number') return;
+    this.editor.view.dispatch(this.editor.view.state.tr.setNodeMarkup(pos, undefined, { ...this.node.attrs, ...attrs }));
   }
 
   start(e, dir) {
@@ -81,8 +146,8 @@ class ImageView {
     e.stopPropagation();
     const h = e.currentTarget;
     try { h.setPointerCapture(e.pointerId); } catch { /* 무시 */ }
-    const w0 = this.img.offsetWidth;
-    const h0 = this.img.offsetHeight;
+    const w0 = this.clip.offsetWidth;
+    const h0 = this.clip.offsetHeight;
     const maxW = this.dom.parentElement?.clientWidth || w0;
     const x0 = e.clientX;
     const y0 = e.clientY;
@@ -90,6 +155,7 @@ class ImageView {
     let w = w0;
     let ht = h0;
     this.dom.classList.add('resizing');
+    this.clip.classList.add('sized');
     const move = (ev) => {
       const dx = ev.clientX - x0;
       const dy = ev.clientY - y0;
@@ -108,18 +174,14 @@ class ImageView {
         ht = Math.max(40, Math.min(4000, h0 + sy));
       }
       this.wrap.style.width = `${w}px`;
-      this.img.style.aspectRatio = `${w} / ${ht}`;
+      this.clip.style.aspectRatio = `${w} / ${ht}`;
     };
     const up = () => {
       h.removeEventListener('pointermove', move);
       h.removeEventListener('pointerup', up);
       h.removeEventListener('pointercancel', up);
       this.dom.classList.remove('resizing');
-      const pos = this.getPos();
-      if (typeof pos !== 'number') return;
-      this.editor.view.dispatch(
-        this.editor.view.state.tr.setNodeMarkup(pos, undefined, { ...this.node.attrs, width: Math.round(w), height: Math.round(ht) })
-      );
+      this.setAttrs({ width: Math.round(w), height: Math.round(ht) });
     };
     h.addEventListener('pointermove', move);
     h.addEventListener('pointerup', up);
@@ -135,7 +197,7 @@ class ImageView {
 
   selectNode() { this.dom.classList.add('selected'); }
   deselectNode() { this.dom.classList.remove('selected'); }
-  stopEvent(e) { return !!e.target.closest?.('.img-h'); }
+  stopEvent(e) { return !!e.target.closest?.('.img-h, .img-menu'); }
   ignoreMutation() { return true; }
 }
 
@@ -146,6 +208,11 @@ const NoteImage = Image.extend({
   addAttributes() {
     return {
       ...this.parent?.(),
+      cropX: { default: null, parseHTML: (el) => (el.getAttribute('data-cropx') == null ? null : Number(el.getAttribute('data-cropx'))), renderHTML: (a) => (a.cropX == null ? {} : { 'data-cropx': a.cropX }) },
+      cropY: { default: null, parseHTML: (el) => (el.getAttribute('data-cropy') == null ? null : Number(el.getAttribute('data-cropy'))), renderHTML: (a) => (a.cropY == null ? {} : { 'data-cropy': a.cropY }) },
+      cropW: { default: null, parseHTML: (el) => (el.getAttribute('data-cropw') == null ? null : Number(el.getAttribute('data-cropw'))), renderHTML: (a) => (a.cropW == null ? {} : { 'data-cropw': a.cropW }) },
+      cropH: { default: null, parseHTML: (el) => (el.getAttribute('data-croph') == null ? null : Number(el.getAttribute('data-croph'))), renderHTML: (a) => (a.cropH == null ? {} : { 'data-croph': a.cropH }) },
+      rotate: { default: null, parseHTML: (el) => (el.getAttribute('data-rotate') == null ? null : Number(el.getAttribute('data-rotate'))), renderHTML: (a) => (a.rotate == null ? {} : { 'data-rotate': a.rotate }) },
       imageId: {
         default: null,
         parseHTML: (el) => el.getAttribute('data-image-id'),

@@ -453,3 +453,42 @@ body.is-dragging, body.is-dragging * { cursor: grabbing !important; }
 .img-wrap:hover .img-h, .img-block.selected .img-h, .img-block.resizing .img-h { opacity: 1; }
 @media (hover: none) { .img-block.selected .img-h { width: 22px; height: 22px; margin: -11px; } }
 @media print { .img-h { display: none !important; } .note-content .img-block.selected .img-wrap img { outline: none; } }
+
+/* ───────── 그림 자르기·회전 (원본 보관) ───────── */
+.note-content .img-clip { position: relative; overflow: hidden; border-radius: 6px; }
+.note-content .img-clip img { border-radius: 0 !important; }
+.note-content .img-clip.sized img { position: absolute; left: 0; top: 0; width: 100%; height: 100%; max-width: none; object-fit: fill; }
+.note-content .img-block.selected .img-clip { outline: 3px solid var(--accent); outline-offset: 1px; }
+.note-content .img-block.selected .img-wrap img { outline: none !important; }
+.img-menu { position: absolute; top: 8px; right: 8px; display: flex; gap: 4px; opacity: 0; transition: opacity .15s; z-index: 3; }
+.img-menu button { width: 32px; height: 32px; border-radius: 8px; background: rgba(22,32,43,.78); color: #fff; font-size: 16px; line-height: 1; }
+.img-menu button:hover { background: var(--accent); }
+.img-menu [data-im='reset'] { display: none; }
+.img-block.edited .img-menu [data-im='reset'] { display: block; }
+.img-wrap:hover .img-menu, .img-block.selected .img-menu { opacity: 1; }
+@media print { .img-menu { display: none !important; } }
+
+.crop-ov { position: fixed; inset: 0; z-index: 100; display: flex; flex-direction: column; background: #0d1116; color: #e8ebee; padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom); }
+.crop-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 14px; flex-wrap: wrap; }
+.crop-ratios, .crop-acts { display: flex; gap: 4px; flex-wrap: wrap; }
+.crop-ov button { padding: 7px 11px; border-radius: 8px; color: #e8ebee; font-size: 13.5px; border: 1px solid #3a414a; }
+.crop-ov button:hover { background: #2a3038; }
+.crop-ov button.on { background: #8fb0e6; color: #10151c; border-color: #8fb0e6; font-weight: 700; }
+.crop-ov button.primary { background: #8fb0e6; color: #10151c; border-color: #8fb0e6; font-weight: 700; }
+.crop-ov [data-act='rotl'], .crop-ov [data-act='rotr'] { font-size: 18px; padding: 4px 10px; }
+.crop-area { flex: 1; min-height: 0; display: grid; place-items: center; padding: 20px 28px; }
+.crop-stage { position: relative; touch-action: none; user-select: none; }
+.crop-shade { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+.crop-hole { position: absolute; box-shadow: 0 0 0 9999px rgba(0,0,0,.6); }
+.crop-stage img { display: block; width: 100%; height: 100%; pointer-events: none; }
+.crop-frame { position: absolute; outline: 2px solid #fff; cursor: move; touch-action: none; }
+.crop-grid { position: absolute; inset: 0; pointer-events: none; background:
+  linear-gradient(to right, transparent 33.2%, rgba(255,255,255,.45) 33.3%, transparent 33.5%, transparent 66.5%, rgba(255,255,255,.45) 66.6%, transparent 66.8%),
+  linear-gradient(to bottom, transparent 33.2%, rgba(255,255,255,.45) 33.3%, transparent 33.5%, transparent 66.5%, rgba(255,255,255,.45) 66.6%, transparent 66.8%); }
+.crop-h { position: absolute; width: 18px; height: 18px; margin: -9px; background: #fff; border-radius: 50%; box-shadow: 0 1px 4px rgba(0,0,0,.5); z-index: 1; touch-action: none; }
+.crop-h[data-h='n'], .crop-h[data-h='s'], .crop-h[data-h='e'], .crop-h[data-h='w'] { border-radius: 4px; }
+.crop-h[data-h='nw'] { left: 0; top: 0; cursor: nwse-resize; } .crop-h[data-h='se'] { right: 0; bottom: 0; cursor: nwse-resize; }
+.crop-h[data-h='ne'] { right: 0; top: 0; cursor: nesw-resize; } .crop-h[data-h='sw'] { left: 0; bottom: 0; cursor: nesw-resize; }
+.crop-h[data-h='n'] { left: 50%; top: 0; cursor: ns-resize; } .crop-h[data-h='s'] { left: 50%; bottom: 0; cursor: ns-resize; }
+.crop-h[data-h='w'] { left: 0; top: 50%; cursor: ew-resize; } .crop-h[data-h='e'] { right: 0; top: 50%; cursor: ew-resize; }
+.crop-tip { margin: 0; padding: 8px 14px 14px; text-align: center; font-size: 12.5px; color: #9aa5b0; }
