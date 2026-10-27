@@ -33,6 +33,7 @@
       <header class="pane-head">
         <button class="icon-btn only-narrow" data-go="folders" aria-label="폴더 보기">☰</button>
         <h1 id="list-title">모든 노트</h1>
+        <button class="btn-ghost" id="btn-new-folder" title="지금 보고 있는 폴더 안에 하위 폴더 만들기" hidden>＋ 폴더</button>
         <button class="btn-primary" id="btn-new">＋ 새 노트</button>
       </header>
       <div class="search-box">
@@ -45,9 +46,9 @@
     <main class="pane pane-editor" aria-label="노트 편집">
       <header class="pane-head">
         <button class="icon-btn only-mobile" data-go="list" aria-label="목록으로">‹</button>
-        <input id="note-title" class="title-input" placeholder="제목" disabled />
-        <span id="save-state" class="save-state"></span>
         <button class="icon-btn" id="btn-fav" title="즐겨찾기" disabled>☆</button>
+        <input id="note-title" class="title-input" placeholder="제목 (#태그를 붙일 수 있음)" disabled />
+        <span id="save-state" class="save-state"></span>
         <select id="sel-tag" class="sel-move sel-tag" title="해시태그로 노트 골라 보기 (제목에 #단어)"></select>
         <select id="sel-bg" class="sel-move sel-bg" title="노트 배경" disabled>
           <option value="lined">줄노트</option>

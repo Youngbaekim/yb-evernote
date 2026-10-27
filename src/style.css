@@ -70,7 +70,8 @@ button:disabled { cursor: default; opacity: .4; }
 .f-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .f-count { font-size: 12px; color: var(--soft); font-weight: 400; }
 .f-more { width: 28px; height: 28px; border-radius: 6px; color: var(--soft); opacity: 0; }
-.folder-row:hover .f-more, .folder-row.active .f-more { opacity: 1; }
+.f-more { opacity: .35 !important; }
+.folder-row:hover .f-more, .folder-row.active .f-more { opacity: 1 !important; }
 @media (hover: none) { .f-more { opacity: .7; } }
 
 /* 목록 */
@@ -325,3 +326,6 @@ body.standalone .note-list, body.standalone .editor-wrap { padding-bottom: env(s
 .ctx-menu button { padding: 8px 10px; border-radius: 6px; text-align: left; font-size: 14px; }
 .ctx-menu button:hover { background: var(--accent-soft); }
 .ctx-menu .danger { color: var(--danger); }
+
+.btn-ghost { padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; font-size: 13px; font-weight: 600; color: var(--accent); white-space: nowrap; }
+.btn-ghost:hover { background: var(--accent-soft); border-color: var(--accent); }

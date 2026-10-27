@@ -4,7 +4,7 @@ import { signIn, signOutUser, watchAuth, finishRedirect } from './firebase.js';
 import { createEditor, toStorableJSON, hydrateJSON, FONTS, SIZES, HIGHLIGHTS } from './editor.js';
 import { newDrawingAttrs, flushAllDrawings, getDrawingView } from './drawing.js';
 
-const VERSION = 'v0.4.1 · 4단계';
+const VERSION = 'v0.4.2 · 4단계';
 const $ = (sel) => document.querySelector(sel);
 const app = $('#app');
 
@@ -190,7 +190,7 @@ function renderFolders() {
     </div>`;
   $('#folder-nav').innerHTML =
     sys.map((f) => item(f, f.icon, count[f.id], false)).join('') +
-    `<div class="nav-label"><span>폴더</span><button class="nav-add" id="btn-add-folder" title="새 폴더">＋</button></div>` +
+    `<div class="nav-label"><span>폴더</span><button class="nav-add" id="btn-add-folder" title="최상위 폴더 만들기 (하위 폴더는 각 폴더의 ⋯ 또는 목록의 ＋ 폴더)">＋</button></div>` +
     folderBranch(null, live);
 }
 
@@ -223,6 +223,7 @@ function renderList() {
   $('#list-title').textContent = filterName() + (state.tag ? ` · #${state.tag}` : '');
   renderTagSelect();
   $('#btn-new').hidden = state.filter === 'trash';
+  $('#btn-new-folder').hidden = ['all', 'fav', 'trash'].includes(state.filter);
   const notes = visibleNotes();
   const live = state.notes.filter((n) => !n.trashedAt);
   const isFolder = !['all', 'fav', 'trash'].includes(state.filter);
@@ -428,9 +429,9 @@ async function addFolder(parentId = null) {
   if (parentId) collapsed.delete(parentId);
   store.saveFolder(folder);
   state.folders.push(folder);
-  state.filter = folder.id;
+  if (!parentId) state.filter = folder.id; // 하위 폴더는 만든 뒤에도 상위 폴더 화면에 머묾(카드로 바로 확인)
   renderList();
-  renderEditorHeader();
+  renderEditorHeader({ keepTitle: true });
 }
 
 function folderMenu(id, anchor) {
@@ -479,13 +480,14 @@ async function removeFolder(f) {
 }
 
 async function toggleFav() {
+  await flushSave(); // 입력 중인 제목·내용을 먼저 저장
   const n = current();
   if (!n) return;
   n.fav = !n.fav;
   n.updatedAt = Date.now();
   store.saveNote(n);
   renderList();
-  renderEditorHeader();
+  renderEditorHeader({ keepTitle: true });
 }
 
 async function setNoteBackground(bg) {
@@ -619,6 +621,7 @@ $('#toolbar').addEventListener('mousedown', (e) => {
 });
 
 $('#btn-new').addEventListener('click', newNote);
+$('#btn-new-folder').addEventListener('click', () => addFolder(state.filter));
 $('#btn-fav').addEventListener('click', toggleFav);
 $('#btn-delete').addEventListener('click', deleteNote);
 $('#sel-move').addEventListener('change', (e) => moveNote(e.target.value));
