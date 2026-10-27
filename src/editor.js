@@ -9,7 +9,7 @@ import { TaskList, TaskItem } from '@tiptap/extension-list';
 import Image from '@tiptap/extension-image';
 import { Placeholder } from '@tiptap/extensions';
 import { compressImage } from './image.js';
-import { Drawing } from './drawing.js';
+import { Drawing, drawingFromImage, activateDrawing } from './drawing.js';
 import { openCropper, rotatedURL } from './crop.js';
 import { putImage, getImage, newId } from './store.js';
 
@@ -60,7 +60,7 @@ class ImageView {
     const dom = document.createElement('div');
     dom.className = 'img-block';
     dom.contentEditable = 'false';
-    dom.innerHTML = `<div class="img-wrap"><div class="img-clip"><img alt="" draggable="false" /></div>${HANDLES.map((h) => `<span class="img-h" data-h="${h}"></span>`).join('')}<div class="img-menu"><button data-im="crop" title="자르기·회전 (원본은 그대로 보관)">✂</button><button data-im="reset" title="원래대로 (자르기·회전 취소)">↺</button></div></div>`;
+    dom.innerHTML = `<div class="img-wrap"><div class="img-clip"><img alt="" draggable="false" /></div>${HANDLES.map((h) => `<span class="img-h" data-h="${h}"></span>`).join('')}<div class="img-menu"><button data-im="crop" title="자르기·회전 (원본은 그대로 보관)">✂</button><button data-im="reset" title="원래대로 (자르기·회전 취소)">↺</button><button data-im="ink" title="그림 위에 필기">✒</button></div></div>`;
     this.dom = dom;
     this.wrap = dom.querySelector('.img-wrap');
     this.clip = dom.querySelector('.img-clip');
@@ -72,6 +72,7 @@ class ImageView {
       const act = e.target.closest('[data-im]')?.dataset.im;
       if (act === 'crop') this.openCrop();
       if (act === 'reset') this.resetCrop();
+      if (act === 'ink') this.toDrawing();
     });
     this.img.addEventListener('dblclick', () => this.openCrop());
   }
@@ -132,6 +133,22 @@ class ImageView {
       aspect = n && (this.node.attrs.rotate || 0) % 180 ? 1 / n : n;
     }
     this.setAttrs({ rotate: 0, cropX: null, cropY: null, cropW: null, cropH: null, width: Math.round(W), height: aspect ? Math.round(W / aspect) : null });
+  }
+
+  /** 이 그림을 '그림 위 필기' 블록으로 바꿈 (보이는 크기·자르기·회전 그대로, 실행 취소로 되돌릴 수 있음) */
+  toDrawing() {
+    if (!this.editor.isEditable || !this.node.attrs.imageId) return;
+    const pos = this.getPos();
+    if (typeof pos !== 'number') return;
+    const w = this.clip.offsetWidth;
+    const h = this.clip.offsetHeight;
+    const full = this.dom.parentElement?.clientWidth || w;
+    if (!w || !h) return;
+    const attrs = drawingFromImage(this.node.attrs, w / full, w / h);
+    const { state } = this.editor.view;
+    const node = state.schema.nodes.drawing.create(attrs);
+    this.editor.view.dispatch(state.tr.replaceWith(pos, pos + this.node.nodeSize, node));
+    activateDrawing(attrs.drawingId);
   }
 
   setAttrs(attrs) {

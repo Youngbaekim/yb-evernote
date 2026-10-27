@@ -119,7 +119,7 @@ export function saveNote(note) {
 /** 영구 삭제: 노트와 그 노트의 그림·필기 묶음 */
 export async function purgeNote(id) {
   const refs = [ref('notes', id)];
-  for (const name of ['images', 'chunks']) {
+  for (const name of ['images', 'chunks', 'versions']) {
     try {
       const snap = await getDocs(query(col(name), where('noteId', '==', id)));
       snap.forEach((d) => refs.push(d.ref));
@@ -132,6 +132,44 @@ export async function purgeNote(id) {
     refs.slice(i, i + 400).forEach((r) => batch.delete(r));
     batch.commit().catch(report('노트 영구 삭제'));
   }
+}
+
+/* ───────── 이전 버전 (덮어쓰기 대비) ───────── */
+const KEEP_VERSIONS = 20; // 노트마다 최근 20개만 보관
+
+/** 지금 내용을 이전 버전으로 보관. reason: auto(일정 시간마다) · other(다른 기기 내용을 덮어쓰기 전) · restore(복원 직전) */
+export function putVersion(noteId, { title, content }, reason) {
+  const id = newId('ver');
+  setDoc(ref('versions', id), clean({
+    noteId, title: title || '', contentJson: content ? JSON.stringify(content) : '',
+    reason, device: DEVICE_ID, savedAt: Date.now(),
+  })).catch(report('이전 버전 저장'));
+  pruneVersions(noteId);
+}
+
+async function pruneVersions(noteId) {
+  try {
+    const snap = await getDocs(query(col('versions'), where('noteId', '==', noteId)));
+    const extra = snap.docs.sort((a, b) => b.data().savedAt - a.data().savedAt).slice(KEEP_VERSIONS);
+    if (!extra.length) return;
+    const batch = writeBatch(fs);
+    extra.forEach((d) => batch.delete(d.ref));
+    batch.commit().catch(report('이전 버전 정리'));
+  } catch (err) {
+    report('이전 버전 정리')(err);
+  }
+}
+
+export async function listVersions(noteId) {
+  const snap = await getDocs(query(col('versions'), where('noteId', '==', noteId)));
+  return snap.docs
+    .map((d) => {
+      const v = d.data();
+      let content = null;
+      try { content = v.contentJson ? JSON.parse(v.contentJson) : null; } catch { /* 무시 */ }
+      return { ...v, id: d.id, content };
+    })
+    .sort((a, b) => b.savedAt - a.savedAt);
 }
 
 /* ───────── 그림 ───────── */
@@ -169,21 +207,55 @@ export function putChunk(chunk) {
   return chunk;
 }
 
-/** 필기 블록의 묶음 구독: 처음에는 전체, 이후 새로 생긴 묶음만 전달 */
+/** 필기 블록의 묶음 구독: 처음에는 전체, 이후 새로 생긴 묶음만 전달
+ *  cb(added, { fromCache, docs }) — docs: 지금 있는 묶음 전체의 { id, createdAt } (묶음 정리에 사용) */
 export function subscribeChunks(drawingId, cb) {
   if (!uid) return () => {};
   return onSnapshot(
     query(col('chunks'), where('drawingId', '==', drawingId)),
+    { includeMetadataChanges: true },
     (snap) => {
       const added = snap
         .docChanges()
         .filter((c) => c.type === 'added')
         .map((c) => ({ ...c.doc.data(), id: c.doc.id }))
         .sort((a, b) => a.createdAt - b.createdAt || (a.seq ?? 0) - (b.seq ?? 0));
-      if (added.length) cb(added);
+      const info = {
+        fromCache: snap.metadata.fromCache,
+        pending: snap.metadata.hasPendingWrites,
+        docs: snap.docs.map((d) => ({ id: d.id, createdAt: d.data().createdAt || 0 })),
+      };
+      cb(added, info);
     },
     report('필기 동기화')
   );
+}
+
+/** 묶음 정리: 지금 남아 있는 획만 새 묶음으로 다시 쓰고, 예전 묶음(지운 획 기록 포함)은 한 번에 삭제
+ *  - 새 묶음과 삭제를 한 묶음 쓰기(batch)로 처리 → 중간에 끊겨도 반쯤 정리된 상태가 생기지 않음
+ *  - 새 묶음의 작성 시각은 예전 묶음 중 가장 늦은 시각 (이후에 다른 기기가 쓴 기록이 뒤에 적용되도록) */
+export function compactChunks({ drawingId, noteId, records, oldIds, createdAt, maxChars }) {
+  const parts = [];
+  let cur = [];
+  let chars = 0;
+  for (const rec of records) {
+    const len = (rec.pts?.length || 0) + 80;
+    if (chars + len > maxChars && cur.length) { parts.push(cur); cur = []; chars = 0; }
+    cur.push(rec);
+    chars += len;
+  }
+  if (cur.length) parts.push(cur);
+  if (parts.length + oldIds.length > 480) return null; // 한 번에 처리할 수 없는 양이면 정리하지 않음
+  const stamp = Date.now().toString(36);
+  const batch = writeBatch(fs);
+  const ids = parts.map((strokes, i) => {
+    const id = `${drawingId}_compact_${stamp}_${i}`;
+    batch.set(ref('chunks', id), clean({ drawingId, noteId, device: 'compact', seq: 0, strokes, erased: [], createdAt }));
+    return id;
+  });
+  oldIds.forEach((id) => batch.delete(ref('chunks', id)));
+  batch.commit().catch(report('필기 묶음 정리'));
+  return ids;
 }
 
 /* ───────── 설정 ───────── */
@@ -240,7 +312,7 @@ const fromB64 = (b64) => Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
 /** 계정의 모든 데이터를 파일 하나로 (그림은 base64) */
 export async function exportAllCloud() {
   const all = async (name) => (await getDocs(col(name))).docs.map((d) => ({ ...d.data(), id: d.id }));
-  const [folders, notesRaw, chunks, imagesRaw] = await Promise.all([all('folders'), all('notes'), all('chunks'), all('images')]);
+  const [folders, notesRaw, chunks, imagesRaw, versions] = await Promise.all([all('folders'), all('notes'), all('chunks'), all('images'), all('versions')]);
   const settingsDoc = await getDoc(ref('settings', 'app'));
   const notes = notesRaw.map(({ contentJson, ...n }) => {
     let content = null;
@@ -256,6 +328,7 @@ export async function exportAllCloud() {
     notes,
     chunks,
     images,
+    versions,
     settings: settingsDoc.exists() ? settingsDoc.data().value : null,
   };
 }
@@ -266,6 +339,7 @@ export async function importAll(data) {
   (data.folders || []).forEach(({ id, ...r }) => ops.push(['folders', id, clean(r)]));
   (data.notes || []).forEach((n) => ops.push(['notes', n.id, noteToDoc(n)]));
   (data.chunks || []).forEach(({ id, ...r }) => ops.push(['chunks', id, clean(r)]));
+  (data.versions || []).forEach(({ id, ...r }) => ops.push(['versions', id, clean(r)]));
   if (data.settings) ops.push(['settings', 'app', { value: clean(data.settings), updatedAt: Date.now() }]);
   for (let i = 0; i < ops.length; i += 200) {
     const batch = writeBatch(fs);

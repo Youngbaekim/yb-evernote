@@ -34,11 +34,12 @@
       <header class="pane-head">
         <button class="icon-btn only-narrow" data-go="folders" aria-label="폴더 보기">☰</button>
         <h1 id="list-title">모든 노트</h1>
+        <select id="sel-tag" class="sel-move sel-tag" title="해시태그로 노트 골라 보기 (제목에 #단어)"></select>
         <button class="btn-ghost" id="btn-new-folder" title="지금 보고 있는 폴더 안에 하위 폴더 만들기" hidden>＋ 폴더</button>
         <button class="btn-primary" id="btn-new">＋ 새 노트</button>
       </header>
       <div class="search-box">
-        <input id="search" type="search" placeholder="제목 검색" />
+        <input id="search" type="search" placeholder="제목+내용 검색" />
         <select id="sel-sort" class="sel-sort" title="노트 정렬 (직접 정렬: 노트를 끌어서 순서 변경)"></select>
       </div>
       <ul id="note-list" class="note-list"></ul>
@@ -48,10 +49,10 @@
     <main class="pane pane-editor" aria-label="노트 편집">
       <header class="pane-head">
         <button class="icon-btn only-mobile" data-go="list" aria-label="목록으로">‹</button>
+        <button class="icon-btn only-desk" id="btn-layout" aria-label="보기 전환"></button>
         <button class="icon-btn" id="btn-fav" title="즐겨찾기" disabled>☆</button>
         <input id="note-title" class="title-input" placeholder="제목 (#태그를 붙일 수 있음)" disabled />
         <span id="save-state" class="save-state"></span>
-        <select id="sel-tag" class="sel-move sel-tag" title="해시태그로 노트 골라 보기 (제목에 #단어)"></select>
         <select id="sel-bg" class="sel-move sel-bg" title="노트 배경" disabled>
           <option value="lined">줄노트</option>
           <option value="blank">무지</option>
@@ -59,6 +60,7 @@
         </select>
         <select id="sel-move" class="sel-move" title="폴더 이동" disabled></select>
         <button class="icon-btn" id="btn-lock" title="이 노트 잠그기" disabled>🔓</button>
+        <button class="icon-btn" id="btn-history" title="이전 버전 보기·복원" disabled>🕘</button>
         <button class="icon-btn" id="btn-print" title="인쇄 · PDF로 저장" disabled>🖨</button>
         <button class="icon-btn" id="btn-delete" title="휴지통으로" disabled>🗑</button>
       </header>
@@ -157,6 +159,15 @@
         <button value="cancel" class="btn-text">취소</button>
         <button value="save" class="btn-primary">저장</button>
       </div>
+    </form>
+  </dialog>
+  <dialog id="history" class="settings history">
+    <form method="dialog">
+      <h3>이전 버전</h3>
+      <p class="hint">노트마다 최근 20개까지 자동으로 보관합니다. 복원해도 지금 내용은 목록에 남습니다.</p>
+      <ul id="history-list" class="history-list"></ul>
+      <div id="history-view" class="history-view" hidden></div>
+      <div class="row-btns" style="justify-content:flex-end;margin-top:12px"><button class="btn-ghost" value="close">닫기</button></div>
     </form>
   </dialog>
   <script type="module" src="/src/main.js"></script>

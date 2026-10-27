@@ -1,12 +1,14 @@
 import './style.css';
 import { getTheme, setTheme } from './theme.js';
+import { applyLayout, cycleLayout } from './layout.js';
 import * as store from './store.js';
 import { signIn, signOutUser, watchAuth, finishRedirect } from './firebase.js';
 import { createEditor, toStorableJSON, hydrateJSON, setSearchTerm, FONTS, SIZES, HIGHLIGHTS, TEXT_COLORS } from './editor.js';
-import { newDrawingAttrs, flushAllDrawings, getDrawingView } from './drawing.js';
+import { newDrawingAttrs, flushAllDrawings, getDrawingView, resetZoom } from './drawing.js';
 import { makeSortable } from './sortable.js';
+import { DEVICE_ID } from './device.js';
 
-const VERSION = 'v0.5.4 · 5단계';
+const VERSION = 'v0.6.0 · 6단계';
 const $ = (sel) => document.querySelector(sel);
 const app = $('#app');
 
@@ -101,6 +103,8 @@ async function flushSave() {
   dirty = false;
   const note = current();
   if (!note) return;
+  keepVersion(note);
+  note.updatedBy = DEVICE_ID; // 다음 저장부터는 '이 기기에서 고친 노트'
   note.title = $('#note-title').value;
   note.tags = tagsOf(note.title);
   note.content = toStorableJSON(editor.getJSON());
@@ -109,6 +113,80 @@ async function flushSave() {
   store.saveNote(note);
   setSaveState('저장됨');
   renderList();
+}
+
+/* ───────── 이전 버전 보관 ─────────
+   저장하기 직전의 내용을 보관: ① 다른 기기에서 마지막으로 고친 노트를 이 기기에서 처음 고칠 때
+   ② 같은 기기라도 마지막 보관 후 30분이 지났을 때 (노트마다 최근 20개) */
+const VERSION_GAP = 30 * 60 * 1000;
+const hasBody = (n) => !!((n.title || '').trim() || /"type":"(text|image|drawing)"/.test(JSON.stringify(n.content || {})));
+function keepVersion(note) {
+  const now = Date.now();
+  const fromOther = !!note.updatedBy && note.updatedBy !== DEVICE_ID;
+  if (!fromOther && note.verAt && now - note.verAt < VERSION_GAP) return;
+  if (!hasBody(note)) return;
+  store.putVersion(note.id, { title: note.title, content: note.content }, fromOther ? 'other' : 'auto');
+  note.verAt = now;
+}
+
+const REASON = { auto: '자동 보관', other: '다른 기기에서 고친 내용', restore: '복원하기 직전 내용' };
+const fmtTime = (t) => {
+  const d = new Date(t);
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}. ${d.getMonth() + 1}. ${d.getDate()}. ${p(d.getHours())}:${p(d.getMinutes())}`;
+};
+
+async function openHistory() {
+  const note = current();
+  if (!note || (note.locked && !isUnlocked())) return;
+  await flushAllDrawings();
+  await flushSave();
+  const dlg = $('#history');
+  const list = $('#history-list');
+  const view = $('#history-view');
+  view.hidden = true;
+  list.innerHTML = '<li class="hint">불러오는 중…</li>';
+  dlg.showModal();
+  let versions = [];
+  try { versions = await store.listVersions(note.id); } catch (err) { console.error(err); }
+  if (!versions.length) {
+    list.innerHTML = '<li class="hint">아직 보관된 이전 버전이 없습니다. 노트를 고치면 30분마다, 그리고 다른 기기에서 고친 노트를 이 기기에서 고칠 때 자동으로 보관됩니다.</li>';
+    return;
+  }
+  list.innerHTML = versions.map((v, i) => {
+    const text = plainText(v.content).join('').replace(/\s+/g, ' ').trim();
+    return `<li data-i="${i}">
+      <div class="vh-meta"><b>${fmtTime(v.savedAt)}</b><span>${REASON[v.reason] || ''}${v.reason === 'other' ? '' : v.device === DEVICE_ID ? ' · 이 기기' : ' · 다른 기기'}</span></div>
+      <div class="vh-prev">${esc(v.title || '(제목 없음)')} — ${esc(text.slice(0, 70)) || '(내용 없음)'}</div>
+      <div class="vh-acts"><button type="button" class="btn-text" data-vh="view">보기</button><button type="button" class="btn-text" data-vh="restore">이 버전으로 복원</button></div>
+    </li>`;
+  }).join('');
+  list.onclick = async (e) => {
+    const b = e.target.closest('[data-vh]');
+    if (!b) return;
+    const v = versions[Number(b.closest('li').dataset.i)];
+    if (b.dataset.vh === 'view') {
+      const text = plainText(v.content).join('').replace(/\n{3,}/g, '\n\n').trim();
+      view.innerHTML = `<div class="vh-meta"><b>${fmtTime(v.savedAt)}</b><button type="button" class="btn-text" data-vh-close>닫기</button></div><h4>${esc(v.title || '(제목 없음)')}</h4><pre>${esc(text) || '(내용 없음)'}</pre><p class="hint">글자만 미리 보여 줍니다. 그림·필기는 복원하면 함께 돌아옵니다.</p>`;
+      view.hidden = false;
+      view.querySelector('[data-vh-close]').onclick = () => { view.hidden = true; };
+      return;
+    }
+    if (!confirm(`${fmtTime(v.savedAt)} 버전으로 되돌릴까요?\n지금 내용은 이전 버전 목록에 따로 보관됩니다.`)) return;
+    const cur = current();
+    if (!cur) return;
+    store.putVersion(cur.id, { title: cur.title, content: cur.content }, 'restore');
+    cur.title = v.title;
+    cur.tags = tagsOf(v.title);
+    cur.content = v.content;
+    cur.updatedAt = Date.now();
+    cur.verAt = Date.now();
+    store.saveNote(cur);
+    dlg.close();
+    await openNote(cur.id);
+    renderList();
+    setSaveState('복원됨');
+  };
 }
 
 async function openNote(id) {
@@ -357,7 +435,7 @@ function renderTagSelect() {
   if (state.tag && !count.has(state.tag)) tags.unshift(state.tag);
   const sel = $('#sel-tag');
   sel.innerHTML =
-    `<option value="">#태그 전체</option>` +
+    `<option value="">#태그</option>` +
     tags.map((t) => `<option value="${esc(t)}">#${esc(t)} (${count.get(t) || 0})</option>`).join('');
   sel.value = state.tag;
   sel.classList.toggle('on', !!state.tag);
@@ -487,6 +565,7 @@ function renderEditorHeader({ keepTitle = false } = {}) {
   $('#btn-lock').title = note?.locked ? '잠긴 노트 (눌러서 잠금 해제)' : '이 노트 잠그기';
   $('#btn-lock').classList.toggle('on', !!note?.locked);
   $('#btn-print').disabled = !has || (note?.locked && !isUnlocked());
+  $('#btn-history').disabled = !has || trashed || (note?.locked && !isUnlocked());
   $('#btn-delete').title = trashed ? '영구 삭제' : '휴지통으로';
   $('#sel-move').disabled = !has || trashed;
   $('#sel-bg').disabled = !has || trashed;
@@ -872,6 +951,9 @@ $('#btn-fav').addEventListener('click', toggleFav);
 $('#btn-delete').addEventListener('click', deleteNote);
 $('#btn-lock').addEventListener('click', toggleLock);
 $('#btn-print').addEventListener('click', printNote);
+$('#btn-history').addEventListener('click', openHistory);
+$('#btn-layout').addEventListener('click', cycleLayout);
+applyLayout();
 $('#sel-theme').value = getTheme();
 $('#sel-theme').addEventListener('change', (e) => setTheme(e.target.value));
 $('#sel-move').addEventListener('change', (e) => moveNote(e.target.value));
@@ -950,6 +1032,7 @@ window.addEventListener('pagehide', flushSave);
 
 /* ───────── 인쇄·PDF ───────── */
 async function printNote() {
+  resetZoom(); // 확대한 필기는 원래 크기로 인쇄
   await flushAllDrawings();
   await flushSave();
   const n = current();

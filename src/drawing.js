@@ -1,6 +1,7 @@
 // 필기 블록 — 텍스트 노트 안에 넣는 필압 펜 영역 (벡터 저장, 획 묶음 단위 기록)
 import { Node, mergeAttributes } from '@tiptap/core';
-import { putChunk, subscribeChunks, newId } from './store.js';
+import { putChunk, subscribeChunks, compactChunks, putImage, getImage, newId } from './store.js';
+import { compressImage } from './image.js';
 import { DEVICE_ID } from './device.js';
 import {
   UNIT_W, A4_PAGE_H, PEN_COLORS, HL_COLORS, PEN_SIZES, HL_SIZE,
@@ -13,6 +14,9 @@ const MIN_HEIGHT = 200; // 무한 종이의 최소 높이
 const FLUSH_DELAY = 2000; // 펜을 2초 떼면 묶음 저장
 const MAX_CHUNK_CHARS = 450_000; // 묶음 1건 약 500KB 이하
 const PAPER_INK = { line: '#D6DCE4', page: '#9AA5B0' };
+const COMPACT_MIN = 30; // 묶음이 이만큼 쌓이면 열 때 한 번 정리
+const ZOOMS = [1, 1.5, 2, 3, 4]; // 확대 단계 (보기 전용, 저장하지 않음)
+const MAX_CANVAS_PX = 16_000_000; // iPad·iPhone 캔버스 한도(약 1,670만 화소) 안쪽
 
 
 /* 도구 아이콘 (단순 선 그림) */
@@ -23,6 +27,9 @@ const ICON = {
   marker: svg('<path d="M14 3.5l6.5 6.5-7 7-6.5-6.5z"/><path d="M7 10.5l6.5 6.5-2.5 2.5H7.5L5 17z"/><path d="M5 17l-2 3.5h5"/>'),
   move: svg('<path d="M12 3v18M3 12h18"/><path d="M9 6l3-3 3 3M9 18l3 3 3-3M6 9l-3 3 3 3M18 9l3 3-3 3"/>'),
   grow: svg('<path d="M12 3.5v12M6.5 10l5.5 5.5 5.5-5.5M4.5 20.5h15"/>', 2.8),
+  zoomIn: svg('<circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5l5 5M7.5 10.5h6M10.5 7.5v6"/>', 2),
+  zoomOut: svg('<circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5l5 5M7.5 10.5h6"/>', 2),
+  image: svg('<rect x="3" y="4.5" width="18" height="15" rx="2"/><circle cx="8.5" cy="9.5" r="1.6"/><path d="M21 16l-5-5-8.5 8.5"/>'),
   shrink: svg('<path d="M12 20.5v-12M6.5 14l5.5-5.5 5.5 5.5M4.5 3.5h15"/>', 2.8),
 };
 
@@ -33,6 +40,10 @@ let activeView = null;
 const views = new Map(); // drawingId → view
 
 export const getDrawingView = (id) => views.get(id);
+/** 인쇄 전: 확대를 원래대로 */
+export const resetZoom = () => views.forEach((v) => v.zoom !== 1 && v.setZoom(1));
+/** 새로 만든 필기 블록을 바로 쓸 수 있게 */
+export const activateDrawing = (id) => setTimeout(() => { const v = views.get(id); if (v) { v.activate(); v.dom.scrollIntoView({ block: 'nearest' }); } }, 0);
 export const flushAllDrawings = () => Promise.all([...views.values()].map((v) => v.flush()));
 
 window.addEventListener('pointerdown', (e) => {
@@ -60,10 +71,13 @@ class DrawingView {
     this.seq = 0;
     this.current = null;
     this.scale = 1;
+    this.zoom = 1;
+    this.touches = new Map(); // 두 손가락 확대용
     this.noteId = options.getNoteId(); // 노트 전환 후 저장돼도 원래 노트로 기록
     this.buildDom();
     views.set(node.attrs.drawingId, this);
     this.load();
+    this.loadBgImage();
   }
 
   /* ───── 화면 구성 ───── */
@@ -90,6 +104,11 @@ class DrawingView {
         <span class="ink-sep"></span>
         <button data-ink-act="undo" title="실행 취소 (Ctrl+Z)">↶</button>
         <button data-ink-act="redo" title="다시 실행 (Ctrl+Y)">↷</button>
+        <button data-ink-act="zoomout" title="축소">${ICON.zoomOut}</button>
+        <button data-ink-act="zoomreset" class="ink-zoom" title="원래 크기로 (보기만 확대, 필기 크기는 그대로)">100%</button>
+        <button data-ink-act="zoomin" title="확대 (두 손가락 벌리기 · Ctrl+휠도 가능)">${ICON.zoomIn}</button>
+        <span class="ink-sep"></span>
+        <button data-ink-act="image" title="배경 그림 넣기 — 그림 위에 필기">${ICON.image}</button>
         <button data-ink-act="shrink" class="ink-bold">${ICON.shrink}</button>
         <button data-ink-act="grow" class="ink-bold">${ICON.grow}</button>
         <button data-ink-act="up" title="필기 블록을 위로 이동 (위 문단과 자리 바꿈)">▲</button>
@@ -97,14 +116,20 @@ class DrawingView {
         <button data-ink-act="done" class="ink-done">완료</button>
       </div>
       <div class="ink-pop" hidden></div>
-      <div class="ink-stage">
-        <canvas class="ink-base"></canvas>
-        <canvas class="ink-live"></canvas>
-        <div class="ink-hint">필기 영역 · 눌러서 쓰기</div>
-      </div>`;
+      <div class="ink-scroll">
+        <div class="ink-stage">
+          <canvas class="ink-base"></canvas>
+          <canvas class="ink-live"></canvas>
+          <div class="ink-hint">필기 영역 · 눌러서 쓰기</div>
+        </div>
+      </div>
+      <input type="file" accept="image/*" class="ink-file" hidden />`;
     this.dom = dom;
     this.bar = dom.querySelector('.ink-bar');
     this.stage = dom.querySelector('.ink-stage');
+    this.scroll = dom.querySelector('.ink-scroll');
+    this.file = dom.querySelector('.ink-file');
+    this.file.addEventListener('change', () => { const f = this.file.files?.[0]; this.file.value = ''; if (f) this.setBgImage(f); });
     this.base = dom.querySelector('.ink-base');
     this.live = dom.querySelector('.ink-live');
     this.bgSel = dom.querySelector('.ink-bg');
@@ -122,9 +147,15 @@ class DrawingView {
     live.addEventListener('pointerup', (e) => this.onUp(e));
     live.addEventListener('pointercancel', (e) => this.onUp(e, true));
     live.addEventListener('contextmenu', (e) => e.preventDefault());
+    // PC: Ctrl+휠(노트북 터치패드 두 손가락 벌리기 포함)로 확대·축소
+    live.addEventListener('wheel', (e) => {
+      if (!e.ctrlKey || !this.dom.classList.contains('active')) return;
+      e.preventDefault();
+      this.stepZoom(e.deltaY < 0 ? 1 : -1, e.clientX, e.clientY);
+    }, { passive: false });
 
     this.ro = new ResizeObserver(() => this.layout());
-    this.ro.observe(this.stage);
+    this.ro.observe(this.scroll);
     this.renderBar();
   }
 
@@ -146,6 +177,12 @@ class DrawingView {
     growBtn.title = a4 ? 'A4 쪽 추가' : '필기 영역 늘리기';
     shrinkBtn.title = a4 ? '마지막 쪽 삭제 (빈 쪽만)' : '필기 영역 줄이기 (아래쪽 빈 공간만)';
     shrinkBtn.disabled = this.shrinkTarget() === null;
+    this.bar.querySelector('.ink-zoom').textContent = `${Math.round(this.zoom * 100)}%`;
+    this.bar.querySelector('[data-ink-act="zoomout"]').disabled = this.zoom <= ZOOMS[0];
+    this.bar.querySelector('[data-ink-act="zoomin"]').disabled = this.zoom >= ZOOMS[ZOOMS.length - 1];
+    const imgBtn = this.bar.querySelector('[data-ink-act="image"]');
+    imgBtn.classList.toggle('on', !!this.node.attrs.imageId);
+    imgBtn.title = this.node.attrs.imageId ? '배경 그림 빼기 (필기는 그대로)' : '배경 그림 넣기 — 그림 위에 필기';
     this.stage.classList.toggle('eraser', ink.tool === 'eraser');
     this.stage.classList.toggle('hand', ink.tool === 'hand');
   }
@@ -187,6 +224,10 @@ class DrawingView {
     if (act === 'redo') this.redo();
     if (act === 'grow') this.grow();
     if (act === 'shrink') this.shrink();
+    if (act === 'zoomin') this.stepZoom(1);
+    if (act === 'zoomout') this.stepZoom(-1);
+    if (act === 'zoomreset') this.setZoom(1);
+    if (act === 'image') return this.toggleBgImage();
     if (act === 'up') return this.moveBlock(-1);
     if (act === 'down') return this.moveBlock(1);
     if (act === 'done') return this.deactivate();
@@ -199,12 +240,15 @@ class DrawingView {
   }
 
   layout() {
-    const w = this.stage.clientWidth;
-    if (!w) return;
+    const base = this.scroll.clientWidth;
+    if (!base) return;
+    const w = Math.round(base * this.zoom);
+    this.stage.style.width = `${w}px`;
     this.scale = w / UNIT_W;
     const h = Math.round(this.heightUnits * this.scale);
     this.stage.style.height = `${h}px`;
-    const dpr = window.devicePixelRatio || 1;
+    // 크게 확대해도 기기 캔버스 한도를 넘지 않게 화소 밀도를 낮춤
+    const dpr = Math.min(window.devicePixelRatio || 1, Math.sqrt(MAX_CANVAS_PX / Math.max(1, w * h)));
     for (const c of [this.base, this.live]) {
       c.width = Math.round(w * dpr);
       c.height = Math.round(h * dpr);
@@ -237,6 +281,7 @@ class DrawingView {
     const ctx = this.ctx(this.base);
     ctx.clearRect(0, 0, UNIT_W, this.heightUnits);
     drawBackground(ctx, this.node.attrs.background, this.heightUnits, this.node.attrs.paper, PAPER_INK);
+    this.paintBgImage(ctx);
     // 형광펜을 먼저 깔고 펜 획을 위에
     for (const s of this.strokes.values()) if (s.tool === 'highlighter') this.paintStroke(ctx, s);
     for (const s of this.strokes.values()) if (s.tool !== 'highlighter') this.paintStroke(ctx, s);
@@ -257,18 +302,44 @@ class DrawingView {
   /** 묶음 구독: 처음엔 전체를, 이후엔 다른 기기에서 새로 쓴 묶음을 받아 반영 */
   load() {
     this.applied = new Set();
-    this.unsub = subscribeChunks(this.node.attrs.drawingId, (chunks) => {
+    this.unsub = subscribeChunks(this.node.attrs.drawingId, (chunks, info) => {
       let changed = false;
       for (const ch of chunks) {
         if (this.applied.has(ch.id)) continue;
         this.applied.add(ch.id);
-        for (const rec of ch.strokes || []) this.strokes.set(rec.id, this.hydrate(rec));
+        const compact = ch.device === 'compact';
+        for (const rec of ch.strokes || []) {
+          // 정리된 묶음: 이미 있는 획이나 이 기기에서 방금 지운(아직 저장 전) 획은 건드리지 않음
+          if (compact && (this.strokes.has(rec.id) || this.pending.get(rec.id)?.erase)) continue;
+          this.strokes.set(rec.id, this.hydrate(rec));
+        }
         for (const id of ch.erased || []) this.strokes.delete(id);
         if (ch.device === DEVICE_ID) this.seq = Math.max(this.seq, ch.seq || 0);
         changed = true;
       }
       if (changed) this.redraw();
+      // 서버와 연결된 상태에서 처음 받은 목록 기준으로 한 번만 정리 여부 판단
+      if (!this.compactChecked && !info.fromCache && !info.pending) {
+        this.compactChecked = true;
+        if (info.docs.length >= COMPACT_MIN) this.compactTimer = setTimeout(() => this.compact(info.docs), 3000);
+      }
     });
+  }
+
+  /** 묶음 정리: 남아 있는 획만 새 묶음으로 (지운 획 기록·자잘한 묶음 정리 → 읽기 건수·용량 절감) */
+  compact(docs) {
+    if (!navigator.onLine || this.current || this.pending.size) return;
+    const records = [...this.strokes.values()].map((s) => this.toRecord(s));
+    const createdAt = Math.max(...docs.map((d) => d.createdAt));
+    const ids = compactChunks({
+      drawingId: this.node.attrs.drawingId,
+      noteId: this.noteId,
+      records,
+      oldIds: docs.map((d) => d.id),
+      createdAt,
+      maxChars: MAX_CHUNK_CHARS,
+    });
+    ids?.forEach((id) => this.applied.add(id));
   }
 
   /* ───── 활성화 ───── */
@@ -294,8 +365,148 @@ class DrawingView {
     return [(e.clientX - r.left) / this.scale, (e.clientY - r.top) / this.scale];
   }
 
+  /* ───── 두 손가락 확대·축소 ───── */
+  pinchDown(e) {
+    if (e.pointerType !== 'touch' || !this.dom.classList.contains('active')) return false;
+    this.touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (this.touches.size !== 2) return false;
+    // 두 번째 손가락: 쓰던 획·화면 이동을 멈추고 확대 시작
+    if (this.current && !this.current.eraser) this.ctx(this.live).clearRect(0, 0, UNIT_W, this.heightUnits);
+    this.current = null;
+    this.panning = null;
+    const [a, b] = [...this.touches.values()];
+    this.pinch = { d0: Math.hypot(a.x - b.x, a.y - b.y) || 1, z: this.zoom };
+    try { this.live.setPointerCapture(e.pointerId); } catch { /* 무시 */ }
+    return true;
+  }
+
+  pinchMove(e) {
+    if (!this.touches.has(e.pointerId)) return false;
+    this.touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (!this.pinch) return false;
+    const [a, b] = [...this.touches.values()];
+    const d = Math.hypot(a.x - b.x, a.y - b.y);
+    const z = Math.min(ZOOMS[ZOOMS.length - 1], Math.max(ZOOMS[0], this.pinch.z * (d / this.pinch.d0)));
+    this.pinch.next = z;
+    this.pinch.cx = (a.x + b.x) / 2;
+    this.pinch.cy = (a.y + b.y) / 2;
+    // 손가락을 떼기 전까지는 화면만 늘려 보여 주고, 뗄 때 선명하게 다시 그림
+    const r = this.stage.getBoundingClientRect();
+    this.stage.style.transformOrigin = `${this.pinch.cx - r.left}px ${this.pinch.cy - r.top}px`;
+    this.stage.style.transform = `scale(${z / this.zoom})`;
+    return true;
+  }
+
+  pinchUp(e) {
+    if (!this.touches.delete(e.pointerId)) return false;
+    if (!this.pinch) return false;
+    if (this.touches.size < 2) {
+      const { next, cx, cy } = this.pinch;
+      this.pinch = null;
+      this.stage.style.transform = '';
+      if (next) this.setZoom(Math.round(next * 4) / 4, cx, cy);
+    }
+    return true;
+  }
+
+  /** 확대 단계 이동 (+1 확대, -1 축소) */
+  stepZoom(dir, cx, cy) {
+    const z = this.zoom;
+    const next = dir > 0 ? ZOOMS.find((v) => v > z + 0.01) : [...ZOOMS].reverse().find((v) => v < z - 0.01);
+    if (next) this.setZoom(next, cx, cy);
+  }
+
+  /** 확대 배율 변경 — 화면 가운데(또는 손가락 사이) 지점이 그대로 보이게 */
+  setZoom(z, cx, cy) {
+    if (Math.abs(z - this.zoom) < 0.001) return;
+    const wrap = this.dom.closest('.editor-wrap');
+    const sr = this.stage.getBoundingClientRect();
+    const vr = (wrap || document.documentElement).getBoundingClientRect();
+    if (cx == null) {
+      const sc = this.scroll.getBoundingClientRect();
+      cx = (sc.left + sc.right) / 2;
+      cy = (Math.max(sr.top, vr.top) + Math.min(sr.bottom, vr.bottom)) / 2;
+    }
+    const k = z / this.zoom;
+    const px = cx - sr.left;
+    const py = cy - sr.top;
+    this.zoom = z;
+    this.layout();
+    this.scroll.scrollLeft += px * k - px;
+    if (wrap) wrap.scrollTop += py * k - py;
+    this.dom.classList.toggle('zoomed', z > 1);
+    this.renderBar();
+  }
+
+  /* ───── 배경 그림 (그림 위에 필기) ───── */
+  async loadBgImage() {
+    const { imageId, rotate } = this.node.attrs;
+    const key = imageId ? `${imageId}|${rotate || 0}` : '';
+    if (this.bgKey === key) return;
+    this.bgKey = key;
+    this.bg = null;
+    if (!imageId) return this.redraw();
+    const rec = await getImage(imageId);
+    if (!rec || this.bgKey !== key) return;
+    let bmp;
+    try { bmp = await createImageBitmap(rec.blob); } catch { return; }
+    const deg = ((rotate || 0) % 360 + 360) % 360;
+    if (deg) {
+      const c = document.createElement('canvas');
+      const side = deg === 90 || deg === 270;
+      c.width = side ? bmp.height : bmp.width;
+      c.height = side ? bmp.width : bmp.height;
+      const x = c.getContext('2d');
+      x.translate(c.width / 2, c.height / 2);
+      x.rotate((deg * Math.PI) / 180);
+      x.drawImage(bmp, -bmp.width / 2, -bmp.height / 2);
+      bmp = c;
+    }
+    if (this.bgKey !== key) return;
+    this.bg = bmp;
+    this.redraw();
+  }
+
+  paintBgImage(ctx) {
+    const a = this.node.attrs;
+    if (!a.imageId || !this.bg) return;
+    const W = this.bg.width;
+    const H = this.bg.height;
+    const c = a.cropW && a.cropH ? { x: a.cropX || 0, y: a.cropY || 0, w: a.cropW, h: a.cropH } : { x: 0, y: 0, w: 1, h: 1 };
+    ctx.drawImage(this.bg, c.x * W, c.y * H, c.w * W, c.h * H, 0, 0, a.imgW || UNIT_W, a.imgH || (UNIT_W * (c.h * H)) / (c.w * W));
+  }
+
+  toggleBgImage() {
+    if (!this.editor.isEditable) return;
+    if (this.node.attrs.imageId) {
+      if (!confirm('배경 그림을 뺄까요? 그 위에 쓴 필기는 그대로 남습니다.')) return;
+      this.setAttrs({ imageId: null, imgW: null, imgH: null, cropX: null, cropY: null, cropW: null, cropH: null, rotate: null });
+      return;
+    }
+    this.file.click();
+  }
+
+  async setBgImage(file) {
+    try {
+      const { blob, width, height, mime } = await compressImage(file);
+      const id = newId('img');
+      await putImage({ id, noteId: this.noteId, blob, width, height, mime, size: blob.size, createdAt: Date.now() });
+      const base = this.scroll.clientWidth || 600;
+      const imgW = Math.min(UNIT_W, (width / base) * UNIT_W);
+      const imgH = (imgW * height) / width;
+      this.setAttrs({
+        imageId: id, imgW: Math.round(imgW), imgH: Math.round(imgH), cropX: null, cropY: null, cropW: null, cropH: null, rotate: null,
+        height: Math.max(this.heightUnits, Math.ceil(imgH + 120)),
+      });
+    } catch (err) {
+      console.error('[YB-EverNote] 배경 그림 처리 실패', err);
+      alert('그림을 처리하지 못했습니다. 다른 형식의 그림으로 다시 시도해 주세요.');
+    }
+  }
+
   onDown(e) {
     if (!this.editor.isEditable) return; // 휴지통 노트는 읽기 전용
+    if (this.pinchDown(e)) return;
     if (e.pointerType === 'pen') penSeen = true;
     if (!this.dom.classList.contains('active')) {
       this.activate();
@@ -304,7 +515,7 @@ class DrawingView {
     if (this.current) return; // 다른 손가락·손바닥 무시
     if ((e.pointerType === 'touch' && penSeen) || (ink.tool === 'hand' && e.pointerType !== 'pen')) {
       // 펜 사용 기기: 손가락은 화면 이동
-      this.panning = { id: e.pointerId, y: e.clientY, wrap: this.dom.closest('.editor-wrap') };
+      this.panning = { id: e.pointerId, x: e.clientX, y: e.clientY, wrap: this.dom.closest('.editor-wrap') };
       try { this.live.setPointerCapture(e.pointerId); } catch { /* 무시 */ }
       return;
     }
@@ -335,10 +546,14 @@ class DrawingView {
   }
 
   onMove(e) {
+    if (this.pinchMove(e)) return;
     if (this.panning && e.pointerId === this.panning.id) {
       const dy = e.clientY - this.panning.y;
+      const dx = e.clientX - this.panning.x;
       this.panning.y = e.clientY;
+      this.panning.x = e.clientX;
       if (this.panning.wrap) this.panning.wrap.scrollTop -= dy;
+      this.scroll.scrollLeft -= dx; // 확대했을 때 좌우 이동
       return;
     }
     const cur = this.current;
@@ -353,6 +568,7 @@ class DrawingView {
   }
 
   onUp(e, cancelled = false) {
+    if (this.pinchUp(e)) return;
     if (this.panning && e.pointerId === this.panning.id) { this.panning = null; return; }
     const cur = this.current;
     if (!cur || e.pointerId !== cur.id) return;
@@ -396,7 +612,7 @@ class DrawingView {
 
   /* ───── 기록·실행 취소 ───── */
   toRecord(s) {
-    return { id: s.id, tool: s.tool, color: s.color, size: s.size, pressure: s.pressure, pts: encodePoints(s.points) };
+    return { id: s.id, tool: s.tool, color: s.color, size: s.size, pressure: s.pressure, pts: s.pts || encodePoints(s.points) };
   }
 
   commit(op, fromHistory = false) {
@@ -526,6 +742,7 @@ class DrawingView {
     const h = this.heightUnits;
     let maxY = 0;
     for (const s of this.strokes.values()) maxY = Math.max(maxY, s.bounds.maxY);
+    if (this.node.attrs.imageId) maxY = Math.max(maxY, this.node.attrs.imgH || 0);
     if (this.node.attrs.paper === 'a4') {
       const next = h - A4_PAGE_H;
       return next >= A4_PAGE_H && maxY <= next ? next : null;
@@ -550,8 +767,9 @@ class DrawingView {
     if (node.type !== this.node.type || node.attrs.drawingId !== this.node.attrs.drawingId) return false;
     const old = this.node.attrs;
     this.node = node;
+    if (old.imageId !== node.attrs.imageId || old.rotate !== node.attrs.rotate) this.loadBgImage();
     if (old.height !== node.attrs.height) this.layout();
-    else if (old.background !== node.attrs.background || old.paper !== node.attrs.paper) this.redraw();
+    else if (old.background !== node.attrs.background || old.paper !== node.attrs.paper || old.imgW !== node.attrs.imgW || old.cropW !== node.attrs.cropW) this.redraw();
     this.renderBar();
     return true;
   }
@@ -565,6 +783,7 @@ class DrawingView {
   }
 
   destroy() {
+    clearTimeout(this.compactTimer);
     this.flush();
     this.unsub?.();
     this.ro.disconnect();
@@ -598,6 +817,15 @@ export const Drawing = Node.create({
       height: attr('height', 'height', INFINITE_START, true),
       background: attr('background', 'background', 'lined'),
       paper: attr('paper', 'paper', 'infinite'),
+      // 배경 그림 (그림 위에 필기): 그림 ID, 필기 영역 안 크기(가로 1000 기준), 자르기·회전
+      imageId: attr('imageId', 'image-id', null),
+      imgW: attr('imgW', 'img-w', null, true),
+      imgH: attr('imgH', 'img-h', null, true),
+      cropX: attr('cropX', 'cropx', null, true),
+      cropY: attr('cropY', 'cropy', null, true),
+      cropW: attr('cropW', 'cropw', null, true),
+      cropH: attr('cropH', 'croph', null, true),
+      rotate: attr('rotate', 'rotate', null, true),
     };
   },
 
@@ -617,6 +845,23 @@ export const Drawing = Node.create({
     return (props) => new DrawingView(props, this.options);
   },
 });
+
+/** 그림 → '그림 위 필기' 블록 속성 (보이는 크기·자르기·회전 그대로)
+ *  @param {object} img 그림 노드 속성  @param {number} frac 노트 폭 대비 그림 폭 (0~1)  @param {number} aspect 보이는 가로/세로 */
+export function drawingFromImage(img, frac, aspect) {
+  const imgW = Math.round(Math.min(1, frac) * UNIT_W);
+  const imgH = Math.round(imgW / aspect);
+  return {
+    drawingId: newId('drw'),
+    height: Math.max(MIN_HEIGHT, imgH + 120),
+    background: 'blank',
+    paper: 'infinite',
+    imageId: img.imageId,
+    imgW, imgH,
+    cropX: img.cropX ?? null, cropY: img.cropY ?? null, cropW: img.cropW ?? null, cropH: img.cropH ?? null,
+    rotate: img.rotate ?? null,
+  };
+}
 
 /** 새 필기 블록 속성 */
 export function newDrawingAttrs(settings) {
