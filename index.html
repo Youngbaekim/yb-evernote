@@ -9,6 +9,10 @@
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="icon" type="image/png" href="icons/icon-192.png" />
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Gowun+Dodum&family=Nanum+Gothic:wght@400;700&family=Nanum+Myeongjo:wght@400;700&family=Nanum+Pen+Script&family=Noto+Sans+KR:wght@400;700&family=Noto+Serif+KR:wght@400;700&display=swap" />
   <title>YB-EverNote</title>
 </head>
 <body>
@@ -19,18 +23,19 @@
         <span class="brand">YB-EverNote</span>
       </header>
       <nav id="folder-nav" class="folder-nav"></nav>
-      <footer class="pane-foot"><span id="version"></span></footer>
+      <footer class="pane-foot"><span id="version"></span><span id="usage"></span></footer>
     </aside>
+    <div class="scrim" data-go="list"></div>
 
     <!-- 2열: 노트 목록 -->
     <section class="pane pane-list" aria-label="노트 목록">
       <header class="pane-head">
-        <button class="icon-btn only-mobile" data-go="folders" aria-label="폴더 보기">☰</button>
+        <button class="icon-btn only-narrow" data-go="folders" aria-label="폴더 보기">☰</button>
         <h1 id="list-title">모든 노트</h1>
-        <button class="btn-primary" id="btn-new" disabled title="1단계에서 구현">＋ 새 노트</button>
+        <button class="btn-primary" id="btn-new">＋ 새 노트</button>
       </header>
       <div class="search-box">
-        <input type="search" placeholder="검색 (5단계 구현 예정)" disabled />
+        <input id="search" type="search" placeholder="제목 검색" />
       </div>
       <ul id="note-list" class="note-list"></ul>
     </section>
@@ -39,21 +44,40 @@
     <main class="pane pane-editor" aria-label="노트 편집">
       <header class="pane-head">
         <button class="icon-btn only-mobile" data-go="list" aria-label="목록으로">‹</button>
-        <h2 id="editor-title">노트를 선택하세요</h2>
+        <input id="note-title" class="title-input" placeholder="제목" disabled />
+        <span id="save-state" class="save-state"></span>
+        <button class="icon-btn" id="btn-fav" title="즐겨찾기" disabled>☆</button>
+        <select id="sel-move" class="sel-move" title="폴더 이동" disabled></select>
+        <button class="icon-btn" id="btn-delete" title="휴지통으로" disabled>🗑</button>
       </header>
-      <div class="toolbar" aria-label="도구 모음">
-        <span class="tool" title="폰트 변경 · 1단계">가</span>
-        <span class="tool" title="체크박스 · 1단계">☑</span>
-        <span class="tool" title="형광펜 · 1단계">🖍</span>
-        <span class="tool" title="그림 붙여넣기 · 1단계">🖼</span>
+      <div class="toolbar" id="toolbar" aria-label="도구 모음">
+        <select id="sel-font" title="글꼴"></select>
+        <select id="sel-size" title="글자 크기"></select>
         <span class="sep"></span>
-        <span class="tool" title="필압 펜 · 2단계">✒</span>
-        <span class="tool" title="지우개 · 2단계">⌫</span>
+        <button class="tool" data-cmd="bold" title="굵게 (Ctrl+B)"><b>B</b></button>
+        <button class="tool" data-cmd="italic" title="기울임 (Ctrl+I)"><i>I</i></button>
+        <button class="tool" data-cmd="underline" title="밑줄 (Ctrl+U)"><u>U</u></button>
+        <button class="tool" data-cmd="strike" title="취소선"><s>S</s></button>
+        <span class="sep"></span>
+        <button class="tool" data-cmd="h1" title="큰 제목">H1</button>
+        <button class="tool" data-cmd="h2" title="작은 제목">H2</button>
+        <button class="tool" data-cmd="bullet" title="글머리 목록">•</button>
+        <button class="tool" data-cmd="ordered" title="번호 목록">1.</button>
+        <button class="tool" data-cmd="task" title="체크박스">☑</button>
+        <span class="sep"></span>
+        <span id="hl-group" class="hl-group" title="형광펜"></span>
+        <span class="sep"></span>
+        <button class="tool" data-cmd="image" title="그림 넣기 (붙여넣기·끌어놓기도 가능)">🖼</button>
+        <input id="file-image" type="file" accept="image/*" multiple hidden />
+        <span class="sep"></span>
+        <button class="tool" data-cmd="undo" title="실행 취소 (Ctrl+Z)">↶</button>
+        <button class="tool" data-cmd="redo" title="다시 실행 (Ctrl+Y)">↷</button>
       </div>
-      <div id="editor-body" class="editor-body">
-        <div class="placeholder">
-          <p class="ph-title">0단계 · 준비 완료</p>
-          <p>화면 골격만 갖춘 상태입니다. 도구 모음은 자리만 잡혀 있으며,<br>텍스트 편집은 1단계, 펜 필기는 2단계에서 동작합니다.</p>
+      <div class="editor-wrap">
+        <div id="editor" class="editor" hidden></div>
+        <div id="empty-state" class="placeholder">
+          <p class="ph-title">노트를 선택하거나 새로 만드세요</p>
+          <p>왼쪽 목록에서 노트를 고르거나 <b>＋ 새 노트</b>를 누르세요.</p>
         </div>
       </div>
     </main>
