@@ -185,6 +185,7 @@ button:disabled { cursor: default; opacity: .4; }
 .dot { display: block; border-radius: 50%; background: currentColor; }
 .dot.s1 { width: 4px; height: 4px; } .dot.s2 { width: 7px; height: 7px; } .dot.s3 { width: 11px; height: 11px; }
 .ink-bg { padding: 4px 6px; border: 1px solid var(--line); border-radius: 8px; background: var(--pane); font-size: 13px; flex: none; }
+.ink-bar button:disabled { opacity: .35; }
 .ink-grow { padding: 0 8px !important; font-size: 13px !important; white-space: nowrap; }
 .ink-done { margin-left: auto; padding: 0 12px !important; font-size: 13px !important; font-weight: 600; background: var(--accent) !important; color: #fff; }
 .ink-stage { position: relative; width: 100%; }
@@ -206,3 +207,40 @@ button:disabled { cursor: default; opacity: .4; }
 .settings label { display: flex; align-items: center; gap: 8px; padding: 5px 0; font-size: 14px; }
 .settings input[type=radio] { accent-color: var(--accent); }
 .dlg-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; }
+
+/* ───────── 타이핑 배경 (줄노트·무지·모눈) ─────────
+   줄 간격 --lh에 맞춰 글자가 줄 위에 놓이도록 문단 간격을 0으로 둠 */
+.editor { --lh: 28px; --rule: #d6dce4; }
+@media (prefers-color-scheme: dark) { .editor { --rule: #343a42; } }
+.editor[data-bg='lined'] .note-content,
+.editor[data-bg='grid'] .note-content {
+  line-height: var(--lh);
+  background-position: 0 -1px;
+  background-attachment: local;
+}
+.editor[data-bg='lined'] .note-content {
+  background-image: repeating-linear-gradient(to bottom, transparent 0, transparent calc(var(--lh) - 1px), var(--rule) calc(var(--lh) - 1px), var(--rule) var(--lh));
+}
+.editor[data-bg='grid'] .note-content {
+  background-image:
+    repeating-linear-gradient(to bottom, transparent 0, transparent calc(var(--lh) - 1px), var(--rule) calc(var(--lh) - 1px), var(--rule) var(--lh)),
+    repeating-linear-gradient(to right, transparent 0, transparent calc(var(--lh) - 1px), var(--rule) calc(var(--lh) - 1px), var(--rule) var(--lh));
+}
+.editor[data-bg='lined'] .note-content > * + *,
+.editor[data-bg='grid'] .note-content > * + * { margin-top: 0; }
+.editor[data-bg='lined'] .note-content :is(h1, h2, ul, ol, blockquote, pre, hr),
+.editor[data-bg='grid'] .note-content :is(h1, h2, ul, ol, blockquote, pre, hr) { margin-top: 0; margin-bottom: 0; }
+.editor[data-bg='lined'] .note-content h1,
+.editor[data-bg='grid'] .note-content h1 { line-height: calc(var(--lh) * 2); }
+.editor[data-bg='lined'] .note-content h2,
+.editor[data-bg='grid'] .note-content h2 { line-height: var(--lh); }
+.editor[data-bg='lined'] .note-content hr,
+.editor[data-bg='grid'] .note-content hr { height: var(--lh); border: 0; background: linear-gradient(var(--soft), var(--soft)) center / 100% 1px no-repeat; }
+.editor[data-bg='lined'] .note-content ul[data-type='taskList'] li > label,
+.editor[data-bg='grid'] .note-content ul[data-type='taskList'] li > label { margin-top: 0; height: var(--lh); display: flex; align-items: center; }
+.editor[data-bg='lined'] .note-content .drawing-block,
+.editor[data-bg='grid'] .note-content .drawing-block,
+.editor[data-bg='lined'] .note-content img,
+.editor[data-bg='grid'] .note-content img { margin: var(--lh) 0; }
+.sel-bg { max-width: 82px; }
+@media (max-width: 680px) { .sel-bg { max-width: 70px; } }
