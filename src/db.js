@@ -1,5 +1,5 @@
-// 저장소 계층 — 1단계: 기기 내 IndexedDB
-// 3단계에서 같은 함수 이름을 유지한 채 Firestore 연동으로 확장합니다.
+// 1·2단계 기기 내 저장소(IndexedDB)
+// 3단계부터는 store.js(Firestore)를 쓰며, 이 파일은 기존 노트를 계정으로 옮길 때만 읽습니다.
 import { openDB } from 'idb';
 
 const DB_NAME = 'yb-evernote';
@@ -112,4 +112,17 @@ export async function getSettings() {
 export async function saveSettings(value) {
   await (await db()).put('settings', { key: 'app', value, updatedAt: Date.now() });
   return value;
+}
+
+/** 기기에 저장된 모든 데이터 (계정으로 옮기기용) */
+export async function exportAll() {
+  try {
+    const d = await db();
+    const [folders, notes, images, chunks, settings] = await Promise.all([
+      d.getAll('folders'), d.getAll('notes'), d.getAll('images'), d.getAll('chunks'), d.get('settings', 'app'),
+    ]);
+    return { folders, notes, images, chunks, settings: settings?.value || null };
+  } catch {
+    return { folders: [], notes: [], images: [], chunks: [], settings: null };
+  }
 }

@@ -1,0 +1,13 @@
+rules_version = '2';
+// YB-EverNote 보안 규칙
+// 본인 계정(youngpeace@gmail.com)으로 로그인했을 때만, 자기 공간(users/{uid})을 읽고 쓸 수 있음
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /users/{uid}/{document=**} {
+      allow read, write: if request.auth != null
+        && request.auth.uid == uid
+        && request.auth.token.email == "youngpeace@gmail.com"
+        && request.auth.token.email_verified == true;
+    }
+  }
+}

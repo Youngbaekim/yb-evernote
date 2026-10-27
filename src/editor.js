@@ -8,7 +8,7 @@ import Image from '@tiptap/extension-image';
 import { Placeholder } from '@tiptap/extensions';
 import { compressImage } from './image.js';
 import { Drawing } from './drawing.js';
-import { putImage, getImage, newId } from './db.js';
+import { putImage, getImage, newId } from './store.js';
 
 export const FONTS = [
   { label: 'Pretendard', value: '' }, // 기본값

@@ -266,3 +266,19 @@ button:disabled { cursor: default; opacity: .4; }
 .tag-chip { display: inline-block; margin-left: 6px; padding: 0 6px; border-radius: 9px; font-size: 11.5px; font-weight: 500; line-height: 18px; color: var(--accent); background: var(--accent-soft); vertical-align: 1px; cursor: pointer; }
 .tag-chip:hover { text-decoration: underline; }
 @media (max-width: 680px) { .sel-tag { max-width: 76px; } }
+
+/* ───────── 3단계: 로그인·동기화 ───────── */
+.login { display: none; position: fixed; inset: 0; z-index: 50; place-items: center; background: var(--desk); padding: 16px; }
+body.signed-out .login { display: grid; }
+.login-card { width: min(380px, 100%); padding: 32px 28px; text-align: center; background: var(--pane); border: 1px solid var(--sheet-line); border-radius: 16px; box-shadow: var(--sheet-shadow); }
+.login-card img { border-radius: 16px; }
+.login-card h2 { margin: 14px 0 6px; font-size: 22px; color: var(--accent); }
+.login-card p { margin: 0 0 20px; color: var(--soft); font-size: 14px; line-height: 1.6; }
+.btn-signin { width: 100%; padding: 12px; font-size: 15px; }
+.login-msg { margin: 14px 0 0 !important; color: var(--danger) !important; font-size: 13px !important; }
+.sync { font-size: 12px; color: var(--soft); }
+.sync[data-s='ok']::first-letter { color: #2e9d57; }
+.sync[data-s='pending']::first-letter { color: #e0a800; }
+.sync[data-s='off']::first-letter { color: #9aa5b0; }
+.account { font-size: 11.5px; color: var(--soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.account-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 14px; }

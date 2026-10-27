@@ -1,9 +1,10 @@
 import './style.css';
-import * as store from './db.js';
+import * as store from './store.js';
+import { signIn, signOutUser, watchAuth, finishRedirect } from './firebase.js';
 import { createEditor, toStorableJSON, hydrateJSON, FONTS, SIZES, HIGHLIGHTS } from './editor.js';
 import { newDrawingAttrs, flushAllDrawings, getDrawingView } from './drawing.js';
 
-const VERSION = 'v0.2.0 · 2단계';
+const VERSION = 'v0.3.0 · 3단계';
 const $ = (sel) => document.querySelector(sel);
 const app = $('#app');
 
@@ -15,6 +16,8 @@ const state = {
   tag: '', // 해시태그 필터 (# 없이)
   noteId: null,
   settings: { paper: 'infinite', background: 'lined', textBackground: 'lined' },
+  user: null,
+  ready: false, // 첫 동기화 자료를 받았는지
 };
 
 /* ───────── 공통 도구 ───────── */
@@ -72,10 +75,9 @@ async function flushSave() {
   note.content = toStorableJSON(editor.getJSON());
   note.preview = editor.getText({ blockSeparator: '\n' }).trim().slice(0, 120);
   note.updatedAt = Date.now();
-  await store.saveNote(note);
+  store.saveNote(note);
   setSaveState('저장됨');
   renderList();
-  refreshUsage();
 }
 
 async function openNote(id) {
@@ -186,12 +188,12 @@ function renderList() {
   renderFolders();
 }
 
-function renderEditorHeader() {
+function renderEditorHeader({ keepTitle = false } = {}) {
   const note = current();
   const has = !!note;
   const trashed = !!note?.trashedAt;
   $('#note-title').disabled = !has || trashed;
-  $('#note-title').value = note?.title ?? '';
+  if (!keepTitle) $('#note-title').value = note?.title ?? '';
   $('#btn-fav').disabled = !has || trashed;
   $('#btn-fav').textContent = note?.fav ? '★' : '☆';
   $('#btn-fav').classList.toggle('on', !!note?.fav);
@@ -280,9 +282,54 @@ function runCmd(cmd) {
 }
 
 /* ───────── 동작 ───────── */
-async function reload() {
-  [state.folders, state.notes] = await Promise.all([store.listFolders(), store.listNotes()]);
+/* ───────── 동기화 (Firestore → 화면) ───────── */
+async function reloadOpenNoteFromRemote() {
+  const note = current();
+  if (!note) return;
+  const content = await hydrateJSON(note.content);
+  const { from } = editor.state.selection;
+  editor.commands.setContent(content || '', { emitUpdate: false });
+  const max = editor.state.doc.content.size;
+  editor.commands.setTextSelection(Math.min(from, max));
+  setSaveState('다른 기기에서 수정됨');
 }
+
+const syncHandlers = {
+  onFolders(list) {
+    state.folders = list;
+    if (!['all', 'fav', 'trash'].includes(state.filter) && !list.some((f) => f.id === state.filter)) state.filter = 'all';
+    renderList();
+    renderEditorHeader({ keepTitle: true });
+  },
+  onNotes(list, remoteIds) {
+    state.notes = list;
+    state.ready = true;
+    if (state.noteId && !current()) {
+      openNote(null); // 다른 기기에서 영구 삭제됨
+      return;
+    }
+    renderList();
+    const typing = dirty || document.activeElement === $('#note-title');
+    if (state.noteId && remoteIds.includes(state.noteId) && !dirty) {
+      reloadOpenNoteFromRemote();
+      if (!typing) renderEditorHeader();
+    } else {
+      renderEditorHeader({ keepTitle: true });
+    }
+  },
+  onSettings(s) {
+    state.settings = s;
+    renderEditorHeader({ keepTitle: true });
+  },
+  onStatus({ pending }) {
+    const el = $('#sync');
+    if (!navigator.onLine) { el.textContent = '● 오프라인 · 기기에 저장 중'; el.dataset.s = 'off'; }
+    else if (pending) { el.textContent = '● 동기화 중…'; el.dataset.s = 'pending'; }
+    else { el.textContent = '● 동기화됨'; el.dataset.s = 'ok'; }
+  },
+};
+window.addEventListener('online', () => syncHandlers.onStatus({ pending: true }));
+window.addEventListener('offline', () => syncHandlers.onStatus({ pending: true }));
 
 async function newNote() {
   await flushSave();
@@ -301,7 +348,7 @@ async function newNote() {
     createdAt: now,
     updatedAt: now,
   };
-  await store.saveNote(note);
+  store.saveNote(note);
   state.notes.unshift(note);
   await openNote(note.id);
   $('#note-title').focus();
@@ -312,7 +359,7 @@ async function addFolder() {
   if (!name) return;
   const now = Date.now();
   const folder = { id: store.newId('fld'), name, order: state.folders.length, createdAt: now, updatedAt: now };
-  await store.saveFolder(folder);
+  store.saveFolder(folder);
   state.folders.push(folder);
   state.filter = folder.id;
   renderList();
@@ -327,13 +374,13 @@ async function folderMenu(id) {
   if (name.trim() === '') {
     if (!confirm(`'${f.name}' 폴더를 삭제할까요?\n안의 노트는 지워지지 않고 '모든 노트'에 남습니다.`)) return;
     await flushSave();
-    await store.deleteFolder(id);
-    await reload();
+    store.deleteFolder(id, state.notes.filter((n) => n.folderId === id));
+    state.folders = state.folders.filter((x) => x.id !== id);
     if (state.filter === id) state.filter = 'all';
   } else {
     f.name = name.trim();
     f.updatedAt = Date.now();
-    await store.saveFolder(f);
+    store.saveFolder(f);
   }
   renderList();
   renderEditorHeader();
@@ -344,7 +391,7 @@ async function toggleFav() {
   if (!n) return;
   n.fav = !n.fav;
   n.updatedAt = Date.now();
-  await store.saveNote(n);
+  store.saveNote(n);
   renderList();
   renderEditorHeader();
 }
@@ -354,7 +401,7 @@ async function setNoteBackground(bg) {
   if (!n) return;
   n.background = bg;
   n.updatedAt = Date.now();
-  await store.saveNote(n);
+  store.saveNote(n);
   $('#editor').dataset.bg = bg;
   renderList();
 }
@@ -364,7 +411,7 @@ async function moveNote(folderId) {
   if (!n) return;
   n.folderId = folderId || null;
   n.updatedAt = Date.now();
-  await store.saveNote(n);
+  store.saveNote(n);
   renderList();
 }
 
@@ -374,7 +421,7 @@ async function deleteNote() {
   await flushSave();
   if (n.trashedAt) return purgeNote();
   n.trashedAt = Date.now();
-  await store.saveNote(n);
+  store.saveNote(n);
   await openNote(null);
 }
 
@@ -383,7 +430,7 @@ async function restoreNote() {
   if (!n) return;
   n.trashedAt = null;
   n.updatedAt = Date.now();
-  await store.saveNote(n);
+  store.saveNote(n);
   state.filter = n.folderId && state.folders.some((f) => f.id === n.folderId) ? n.folderId : 'all';
   await openNote(n.id);
 }
@@ -391,15 +438,15 @@ async function restoreNote() {
 async function purgeNote() {
   const n = current();
   if (!n || !confirm('이 노트를 영구 삭제할까요? 되돌릴 수 없습니다.')) return;
-  await store.purgeNote(n.id);
+  store.purgeNote(n.id);
   state.notes = state.notes.filter((x) => x.id !== n.id);
   await openNote(null);
-  refreshUsage();
+  setTimeout(refreshUsage, 3000);
 }
 
 async function refreshUsage() {
   const u = await store.imageUsage();
-  $('#usage').textContent = u.count ? ` · 그림 ${u.count}장 ${(u.bytes / 1048576).toFixed(1)}MB` : '';
+  if (u) $('#usage').textContent = u.count ? ` · 그림 ${u.count}장 ${(u.bytes / 1048576).toFixed(1)}MB` : '';
 }
 
 /* ───────── 설정 ───────── */
@@ -409,6 +456,7 @@ function openSettings() {
   dlg.querySelector(`[name=paper][value=${s.paper}]`).checked = true;
   dlg.querySelector(`[name=background][value=${s.background}]`).checked = true;
   dlg.querySelector(`[name=textBackground][value=${s.textBackground}]`).checked = true;
+  $('#account-email').textContent = state.user?.email ?? '';
   dlg.showModal();
 }
 $('#settings').addEventListener('close', async () => {
@@ -419,8 +467,8 @@ $('#settings').addEventListener('close', async () => {
     background: dlg.querySelector('[name=background]:checked').value,
     textBackground: dlg.querySelector('[name=textBackground]:checked').value,
   };
-  await store.saveSettings(state.settings);
-  renderEditorHeader();
+  store.saveSettings(state.settings);
+  renderEditorHeader({ keepTitle: true });
 });
 
 /* ───────── 이벤트 연결 ───────── */
@@ -462,6 +510,8 @@ document.addEventListener('click', async (e) => {
       : editor.chain().focus().unsetHighlight().run();
   }
   if (t.closest('#btn-settings')) return openSettings();
+  if (t.closest('#btn-signin')) return doSignIn();
+  if (t.closest('#btn-signout')) return doSignOut();
   if (t.closest('#btn-restore')) return restoreNote();
   if (t.closest('#btn-purge')) return purgeNote();
 });
@@ -513,14 +563,68 @@ document.addEventListener('visibilitychange', () => {
 });
 window.addEventListener('pagehide', flushSave);
 
+/* ───────── 로그인 ───────── */
+async function doSignIn() {
+  const btn = $('#btn-signin');
+  btn.disabled = true;
+  $('#login-msg').textContent = '';
+  try {
+    await signIn();
+  } catch (err) {
+    console.error(err);
+    $('#login-msg').textContent = `로그인하지 못했습니다 (${err.code || err.message}). 잠시 후 다시 시도해 주세요.`;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function doSignOut() {
+  if (!confirm('로그아웃할까요? 다시 로그인하면 노트가 그대로 보입니다.')) return;
+  await flushAllDrawings();
+  await flushSave();
+  $('#settings').close();
+  await signOutUser();
+}
+
+/** 1·2단계에서 이 기기에만 저장한 노트를 계정으로 옮기기 */
+async function offerMigration() {
+  const all = await store.localDataSummary();
+  if (!all) return;
+  const msg = `이 기기에 저장된 기존 노트 ${all.notes.length}개(폴더 ${all.folders.length}개, 그림 ${all.images.length}장)를 계정으로 옮길까요?\n\n옮기면 다른 기기에서도 보입니다. 취소하면 다시 묻지 않습니다.`;
+  if (!confirm(msg)) return store.skipMigration();
+  const el = $('#sync');
+  await store.migrateLocal(all, (done, total) => { el.textContent = `● 기존 노트 옮기는 중 ${done}/${total}`; });
+  el.textContent = '● 옮기기 완료';
+}
+
+function onSignedIn(user) {
+  state.user = user;
+  document.body.classList.remove('signed-out');
+  $('#account').textContent = user.email;
+  store.startSync(user.uid, syncHandlers);
+  renderList();
+  renderEditorHeader();
+  setTimeout(refreshUsage, 2000);
+  offerMigration();
+}
+
+async function onSignedOut() {
+  store.stopSync();
+  state.user = null;
+  state.notes = [];
+  state.folders = [];
+  state.noteId = null;
+  await openNote(null);
+  document.body.classList.add('signed-out');
+}
+
 /* ───────── 시작 ───────── */
 (async () => {
   $('#version').textContent = VERSION;
   buildToolbar();
-  state.settings = await store.getSettings();
-  await reload();
   renderList();
   renderEditorHeader();
-  refreshUsage();
+  finishRedirect();
+  watchAuth((user) => (user ? onSignedIn(user) : onSignedOut()));
   if (navigator.storage?.persist) navigator.storage.persist().catch(() => {});
 })();
