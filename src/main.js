@@ -1,10 +1,11 @@
 import './style.css';
 import * as store from './store.js';
 import { signIn, signOutUser, watchAuth, finishRedirect } from './firebase.js';
-import { createEditor, toStorableJSON, hydrateJSON, FONTS, SIZES, HIGHLIGHTS } from './editor.js';
+import { createEditor, toStorableJSON, hydrateJSON, FONTS, SIZES, HIGHLIGHTS, TEXT_COLORS } from './editor.js';
 import { newDrawingAttrs, flushAllDrawings, getDrawingView } from './drawing.js';
+import { makeSortable } from './sortable.js';
 
-const VERSION = 'v0.4.2 · 4단계';
+const VERSION = 'v0.4.4 · 4단계';
 const $ = (sel) => document.querySelector(sel);
 const app = $('#app');
 
@@ -15,7 +16,7 @@ const state = {
   search: '',
   tag: '', // 해시태그 필터 (# 없이)
   noteId: null,
-  settings: { paper: 'infinite', background: 'lined', textBackground: 'lined' },
+  settings: { paper: 'infinite', background: 'lined', textBackground: 'lined', noteSort: 'manual' },
   user: null,
   ready: false, // 첫 동기화 자료를 받았는지
 };
@@ -126,7 +127,7 @@ async function openNote(id) {
   $('#empty-state').hidden = true;
   const content = await hydrateJSON(note.content);
   editor.commands.setContent(content || '', { emitUpdate: false });
-  editor.setEditable(!note.trashedAt);
+  editor.setEditable(!note.trashedAt, false); // false: 여는 것만으로는 '수정됨'으로 저장하지 않음
   setSaveState('');
   updateToolbar();
 }
@@ -143,7 +144,83 @@ function visibleNotes() {
   if (state.tag) list = list.filter((n) => tagsOf(n.title).includes(state.tag));
   const q = state.search.trim().toLowerCase();
   if (q) list = list.filter((n) => titleOf(n).toLowerCase().includes(q) || (n.preview || '').toLowerCase().includes(q));
-  return list;
+  return sortNotes(list);
+}
+
+/* ───────── 정렬 ───────── */
+const SORTS = { manual: '직접 정렬', updated: '수정일순', created: '만든 날짜순', title: '제목순' };
+const noteOrder = (n) => n.order ?? -(n.updatedAt || 0);
+function sortNotes(list) {
+  const mode = state.settings.noteSort || 'manual';
+  const by = {
+    manual: (a, b) => noteOrder(a) - noteOrder(b),
+    updated: (a, b) => b.updatedAt - a.updatedAt,
+    created: (a, b) => b.createdAt - a.createdAt,
+    title: (a, b) => titleOf(a).localeCompare(titleOf(b), 'ko'),
+  }[mode] || ((a, b) => noteOrder(a) - noteOrder(b));
+  return [...list].sort(by);
+}
+
+/** 순서값 정하기: 앞뒤 항목 사이 값. 간격이 너무 좁으면 목록 전체를 다시 매김 */
+function between(prev, next) {
+  if (prev == null && next == null) return 0;
+  if (prev == null) return next - 1000;
+  if (next == null) return prev + 1000;
+  return (prev + next) / 2;
+}
+
+/** 노트를 끌어 놓았을 때 */
+function dropNote(srcId, target, place) {
+  const n = state.notes.find((x) => x.id === srcId);
+  if (!n) return;
+  // 왼쪽 폴더 위에 놓으면 그 폴더로 이동
+  if (target.dataset.fid) {
+    n.folderId = target.dataset.fid;
+    store.updateFields('notes', n.id, { folderId: n.folderId });
+    renderList();
+    if (state.noteId === n.id) renderEditorHeader({ keepTitle: true });
+    return;
+  }
+  const list = visibleNotes().filter((x) => x.id !== srcId);
+  let i = list.findIndex((x) => x.id === target.dataset.note);
+  if (i < 0) return;
+  if (place === 'after') i += 1;
+  const prev = list[i - 1] ? noteOrder(list[i - 1]) : null;
+  const next = list[i] ? noteOrder(list[i]) : null;
+  if (prev != null && next != null && Math.abs(next - prev) < 1e-6) {
+    // 다시 매기기
+    list.splice(i, 0, n);
+    const base = noteOrder(list[0]);
+    const updates = list.map((x, k) => { x.order = base + k * 1000; return { id: x.id, fields: { order: x.order } }; });
+    store.updateMany('notes', updates);
+  } else {
+    n.order = between(prev, next);
+    store.updateFields('notes', n.id, { order: n.order });
+  }
+  renderList();
+}
+
+/** 폴더를 끌어 놓았을 때: 위·아래는 같은 단계에서 순서 변경, 가운데는 그 폴더 안으로 */
+function dropFolder(srcId, target, place) {
+  const f = folderById(srcId);
+  const t = folderById(target.dataset.fid);
+  if (!f || !t || f.id === t.id) return;
+  if (folderPath(t.id).some((x) => x.id === f.id)) return; // 자기 하위로는 이동 불가
+  if (place === 'inside') {
+    const kids = childrenOf(t.id).filter((x) => x.id !== f.id);
+    f.parentId = t.id;
+    f.order = kids.length ? Math.max(...kids.map((x) => x.order ?? 0)) + 1000 : 0;
+    collapsed.delete(t.id);
+  } else {
+    const sibs = childrenOf(t.parentId ?? null).filter((x) => x.id !== f.id);
+    let i = sibs.findIndex((x) => x.id === t.id) + (place === 'after' ? 1 : 0);
+    f.parentId = t.parentId ?? null;
+    f.order = between(sibs[i - 1]?.order ?? null, sibs[i]?.order ?? null);
+  }
+  store.updateFields('folders', f.id, { parentId: f.parentId, order: f.order });
+  state.folders.sort((a, b) => (a.order ?? 0) - (b.order ?? 0) || a.createdAt - b.createdAt);
+  renderList();
+  renderEditorHeader({ keepTitle: true });
 }
 
 function renderTagSelect() {
@@ -207,7 +284,7 @@ function folderBranch(pid, live, seen = new Set()) {
       const sub = hasKids && open ? `<div class="tree-children">${folderBranch(f.id, live, seen)}</div>` : '';
       return `
       <div class="tree-node">
-        <div class="folder-row ${state.filter === f.id ? 'active' : ''}">
+        <div class="folder-row ${state.filter === f.id ? 'active' : ''}" data-fid="${f.id}">
           ${hasKids ? `<button class="f-caret ${open ? 'open' : ''}" data-collapse="${f.id}" title="${open ? '접기' : '펼치기'}">▸</button>` : '<span class="f-caret-sp"></span>'}
           <button class="folder" data-folder="${f.id}">
             <span class="f-icon">${FOLDER_SVG}</span><span class="f-name">${esc(f.name)}</span><span class="f-count">${n}</span>
@@ -221,6 +298,10 @@ function folderBranch(pid, live, seen = new Set()) {
 
 function renderList() {
   $('#list-title').textContent = filterName() + (state.tag ? ` · #${state.tag}` : '');
+  const sortSel = $('#sel-sort');
+  if (!sortSel.options.length) sortSel.innerHTML = Object.entries(SORTS).map(([k, v]) => `<option value="${k}">${v}</option>`).join('');
+  sortSel.value = state.settings.noteSort || 'manual';
+  $('#note-list').classList.toggle('manual', sortSel.value === 'manual');
   renderTagSelect();
   $('#btn-new').hidden = state.filter === 'trash';
   $('#btn-new-folder').hidden = ['all', 'fav', 'trash'].includes(state.filter);
@@ -290,6 +371,9 @@ function renderEditorHeader({ keepTitle = false } = {}) {
 function buildToolbar() {
   $('#sel-font').innerHTML = FONTS.map((f) => `<option value='${f.value}'>${f.label}</option>`).join('');
   $('#sel-size').innerHTML = `<option value="">크기</option>` + SIZES.map((s) => `<option value="${s}">${parseInt(s)}</option>`).join('');
+  $('#tc-group').innerHTML =
+    `<button class="tc tc-auto" data-tc="" title="기본 글자색 (밝은 화면: 검정 / 다크 모드: 흰색)">가</button>` +
+    TEXT_COLORS.map((c) => `<button class="tc" data-tc="${c.color}" title="글자색 ${c.label}" style="--tc:${c.color}">가</button>`).join('');
   $('#hl-group').innerHTML =
     HIGHLIGHTS.map((h) => `<button class="hl" data-hl="${h.color}" title="형광펜 ${h.label}" style="--hl:${h.color}"></button>`).join('') +
     `<button class="hl hl-none" data-hl="" title="형광펜 지우기">⌀</button>`;
@@ -310,6 +394,8 @@ function updateToolbar() {
   const ts = ed.getAttributes('textStyle');
   $('#sel-font').value = ts.fontFamily ?? '';
   $('#sel-size').value = ts.fontSize ?? '';
+  const tc = ed.getAttributes('textStyle').color || '';
+  document.querySelectorAll('[data-tc]').forEach((b) => b.classList.toggle('active', b.dataset.tc === tc));
   const hl = ed.getAttributes('highlight').color;
   document.querySelectorAll('[data-hl]').forEach((b) => b.classList.toggle('active', !!hl && b.dataset.hl === hl));
 }
@@ -370,6 +456,12 @@ const syncHandlers = {
   onNotes(list, remoteIds) {
     state.notes = list;
     state.ready = true;
+    // 순서값이 없는 기존 노트: 지금 보이는 순서(수정일순)를 그대로 순서값으로 한 번 기록
+    const missing = list.filter((n) => n.order == null);
+    if (missing.length) {
+      missing.forEach((n) => (n.order = -(n.updatedAt || 0)));
+      store.updateMany('notes', missing.map((n) => ({ id: n.id, fields: { order: n.order } })));
+    }
     if (state.noteId && !current()) {
       openNote(null); // 다른 기기에서 영구 삭제됨
       return;
@@ -411,6 +503,7 @@ async function newNote() {
     content: null,
     preview: '',
     trashedAt: null,
+    order: Math.min(0, ...state.notes.map(noteOrder)) - 1000, // 직접 정렬에서 맨 위
     createdAt: now,
     updatedAt: now,
   };
@@ -560,6 +653,7 @@ $('#settings').addEventListener('close', async () => {
     paper: dlg.querySelector('[name=paper]:checked').value,
     background: dlg.querySelector('[name=background]:checked').value,
     textBackground: dlg.querySelector('[name=textBackground]:checked').value,
+    noteSort: state.settings.noteSort || 'manual',
   };
   store.saveSettings(state.settings);
   renderEditorHeader({ keepTitle: true });
@@ -600,6 +694,11 @@ document.addEventListener('click', async (e) => {
   }
   const cmd = t.closest('[data-cmd]');
   if (cmd) return runCmd(cmd.dataset.cmd);
+  const tcBtn = t.closest('[data-tc]');
+  if (tcBtn) {
+    const color = tcBtn.dataset.tc;
+    return color ? editor.chain().focus().setColor(color).run() : editor.chain().focus().unsetColor().run();
+  }
   const hl = t.closest('[data-hl]');
   if (hl) {
     const color = hl.dataset.hl;
@@ -626,6 +725,32 @@ $('#btn-fav').addEventListener('click', toggleFav);
 $('#btn-delete').addEventListener('click', deleteNote);
 $('#sel-move').addEventListener('change', (e) => moveNote(e.target.value));
 $('#sel-bg').addEventListener('change', (e) => setNoteBackground(e.target.value));
+$('#sel-sort').addEventListener('change', (e) => {
+  state.settings = { ...state.settings, noteSort: e.target.value };
+  store.saveSettings(state.settings);
+  renderList();
+});
+
+// 끌어서 순서 바꾸기: 노트(직접 정렬일 때 순서, 왼쪽 폴더 위에 놓으면 이동), 폴더(순서·하위로 이동)
+makeSortable({
+  root: $('#note-list'),
+  item: '.note-card',
+  targets: '.note-card, .folder-row[data-fid]',
+  enabled: () => state.filter !== 'trash',
+  places: (src, t) => {
+    if (t.dataset.fid) return ['inside'];
+    return (state.settings.noteSort || 'manual') === 'manual' && !state.search.trim() ? ['before', 'after'] : [];
+  },
+  onDrop: (src, t, place) => dropNote(src.dataset.note, t, place),
+});
+makeSortable({
+  root: $('#folder-nav'),
+  item: '.folder-row[data-fid]',
+  targets: '.folder-row[data-fid]',
+  places: (src, t) => (folderPath(t.dataset.fid).some((x) => x.id === src.dataset.fid) ? [] : ['before', 'inside', 'after']),
+  onDrop: (src, t, place) => dropFolder(src.dataset.fid, t, place),
+});
+
 $('#sel-tag').addEventListener('change', (e) => {
   state.tag = e.target.value;
   app.dataset.view = 'list';

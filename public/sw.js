@@ -1,6 +1,6 @@
 // YB-EverNote 서비스 워커 — 인터넷이 없어도 앱 화면이 열리도록 파일을 기기에 보관
 // 노트 데이터는 Firestore가 따로 기기에 보관하므로 여기서는 다루지 않음
-const VERSION = 'v0.4.2';
+const VERSION = 'v0.4.4';
 const SHELL = `yb-shell-${VERSION}`;
 const FONTS = 'yb-fonts-v1';
 const SCOPE = self.registration.scope; // https://…/yb-evernote/

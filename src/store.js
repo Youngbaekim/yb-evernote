@@ -2,7 +2,7 @@
 // 쓰기는 기기 안 사본에 먼저 반영되고, 온라인이 되면 서버로 자동 전송됩니다.
 // 따라서 쓰기 함수는 서버 응답을 기다리지 않습니다(오프라인에서도 바로 다음 작업 가능).
 import {
-  collection, doc, setDoc, deleteDoc, onSnapshot, query, where, getDocs, getDoc, getDocFromCache,
+  collection, doc, setDoc, updateDoc, deleteDoc, onSnapshot, query, where, getDocs, getDoc, getDocFromCache,
   writeBatch, Bytes, getAggregateFromServer, count, sum,
 } from 'firebase/firestore';
 import { fs } from './firebase.js';
@@ -78,6 +78,18 @@ export function startSync(userId, h) {
 export function stopSync() {
   while (unsubs.length) unsubs.pop()();
   uid = null;
+}
+
+/* ───────── 일부 항목만 고치기 (순서 변경 등: 본문을 다시 쓰지 않음) ───────── */
+export function updateFields(name, id, fields) {
+  updateDoc(ref(name, id), clean({ ...fields, updatedBy: DEVICE_ID })).catch(report('순서 저장'));
+}
+export function updateMany(name, list) {
+  for (let i = 0; i < list.length; i += 400) {
+    const batch = writeBatch(fs);
+    list.slice(i, i + 400).forEach(({ id, fields }) => batch.update(ref(name, id), clean({ ...fields, updatedBy: DEVICE_ID })));
+    batch.commit().catch(report('순서 저장'));
+  }
 }
 
 /* ───────── 폴더 ───────── */

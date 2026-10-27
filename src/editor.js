@@ -1,7 +1,7 @@
 // Tiptap 편집기 — 폰트·크기, 체크박스, 형광펜, 그림 붙여넣기
 import { Editor } from '@tiptap/core';
 import StarterKit from '@tiptap/starter-kit';
-import { TextStyle, FontFamily, FontSize } from '@tiptap/extension-text-style';
+import { TextStyle, FontFamily, FontSize, Color } from '@tiptap/extension-text-style';
 import Highlight from '@tiptap/extension-highlight';
 import { TaskList, TaskItem } from '@tiptap/extension-list';
 import Image from '@tiptap/extension-image';
@@ -20,6 +20,12 @@ export const FONTS = [
   { label: '고운돋움', value: '"Gowun Dodum"' },
 ];
 export const SIZES = ['12px', '14px', '16px', '18px', '20px', '24px', '28px', '32px'];
+/* 글자색: 다크 모드에서는 읽기 쉽도록 밝은 톤으로 바꿔 보여 줌(저장값은 그대로) */
+export const TEXT_COLORS = [
+  { label: '검정', color: '#111111' },
+  { label: '군청', color: '#1F3A93' },
+  { label: '빨강', color: '#D32F2F' },
+];
 export const HIGHLIGHTS = [
   { label: '노랑', color: '#FFF176' },
   { label: '연두', color: '#C5E1A5' },
@@ -113,6 +119,7 @@ export function createEditor(element, { onUpdate, getNoteId, onInk }) {
       TextStyle,
       FontFamily,
       FontSize,
+      Color,
       Highlight.configure({ multicolor: true }),
       TaskList,
       TaskItem.configure({ nested: true }),

@@ -38,6 +38,7 @@
       </header>
       <div class="search-box">
         <input id="search" type="search" placeholder="제목 검색" />
+        <select id="sel-sort" class="sel-sort" title="노트 정렬 (직접 정렬: 노트를 끌어서 순서 변경)"></select>
       </div>
       <ul id="note-list" class="note-list"></ul>
     </section>
@@ -72,6 +73,8 @@
         <button class="tool" data-cmd="bullet" title="글머리 목록">•</button>
         <button class="tool" data-cmd="ordered" title="번호 목록">1.</button>
         <button class="tool" data-cmd="task" title="체크박스">☑</button>
+        <span class="sep"></span>
+        <span id="tc-group" class="tc-group" title="글자색"></span>
         <span class="sep"></span>
         <span id="hl-group" class="hl-group" title="형광펜"></span>
         <span class="sep"></span>
