@@ -1,6 +1,7 @@
 import './style.css';
 import { getTheme, setTheme } from './theme.js';
 import { applyLayout, cycleLayout } from './layout.js';
+import { initNoteZoom, stepZoom, setZoom, getZoom } from './notezoom.js';
 import * as store from './store.js';
 import { signIn, signOutUser, watchAuth, finishRedirect } from './firebase.js';
 import { createEditor, toStorableJSON, hydrateJSON, setSearchTerm, FONTS, SIZES, HIGHLIGHTS, TEXT_COLORS } from './editor.js';
@@ -8,7 +9,7 @@ import { newDrawingAttrs, flushAllDrawings, getDrawingView, resetZoom } from './
 import { makeSortable } from './sortable.js';
 import { DEVICE_ID } from './device.js';
 
-const VERSION = 'v0.6.3 · 6단계';
+const VERSION = 'v0.6.6 · 6단계';
 const $ = (sel) => document.querySelector(sel);
 const app = $('#app');
 
@@ -572,6 +573,7 @@ function renderEditorHeader({ keepTitle = false } = {}) {
   $('#btn-fav').textContent = note?.fav ? '★' : '☆';
   $('#btn-fav').classList.toggle('on', !!note?.fav);
   $('#btn-delete').disabled = !has;
+  $('#btn-more').disabled = !has;
   $('#btn-lock').disabled = !has || trashed;
   $('#btn-lock').textContent = note?.locked ? '🔒' : '🔓';
   $('#btn-lock').title = note?.locked ? '잠긴 노트 (눌러서 잠금 해제)' : '이 노트 잠그기';
@@ -787,6 +789,35 @@ function folderMenu(id, anchor) {
   };
 }
 
+/** 휴대폰: 잠금·이전 버전·인쇄·삭제를 ⋯ 메뉴로 (PC·태블릿은 머리줄 단추 그대로) */
+function noteMenu(anchor) {
+  const menu = $('#ctx-menu');
+  const items = ['#btn-lock', '#btn-history', '#btn-print', '#btn-delete']
+    .map((id) => $(id))
+    .filter((b) => !b.disabled)
+    .map((b) => `<button data-nm="${b.id}" class="${b.id === 'btn-delete' ? 'danger' : ''}">${b.textContent} ${esc(b.title)}</button>`);
+  if (!items.length) return;
+  const pct = Math.round(getZoom() * 100);
+  items.unshift(`<div class="nm-zoom"><span>노트 배율</span><button data-nz="-1" aria-label="축소">－</button><button data-nz="0">${pct}%</button><button data-nz="1" aria-label="확대">＋</button></div>`);
+  menu.innerHTML = items.join('');
+  const r = anchor.getBoundingClientRect();
+  menu.hidden = false;
+  menu.style.left = `${Math.max(8, Math.min(r.right - 220, window.innerWidth - 228))}px`;
+  menu.style.top = `${r.bottom + 4}px`;
+  menu.onclick = (e) => {
+    const zb = e.target.closest('[data-nz]');
+    if (zb) {
+      const d = Number(zb.dataset.nz);
+      if (d) stepZoom(d); else setZoom(1);
+      menu.querySelector('[data-nz="0"]').textContent = `${Math.round(getZoom() * 100)}%`;
+      return; // 메뉴는 열어 둔 채로 여러 번 조절
+    }
+    const id = e.target.closest('[data-nm]')?.dataset.nm;
+    menu.hidden = true;
+    if (id) $('#' + id).click();
+  };
+}
+
 function renameFolder(f) {
   const name = prompt('폴더 이름 변경', f.name)?.trim();
   if (!name) return;
@@ -837,7 +868,7 @@ function renderBgSelect(note) {
   $('#sel-bg').innerHTML =
     pat.map(([v, l]) => `<option value="${v}">${l}</option>`).join('') +
     `<option disabled>──────</option>` +
-    PAPER_COLORS.map((c) => `<option value="c:${c.key}">${c.key === color ? '✓ ' : '\u3000'}${c.key ? '● ' : '○ '}${c.label}</option>`).join('');
+    PAPER_COLORS.map((c) => `<option value="c:${c.key}" class="c-opt c-${c.key || 'none'}">${c.key === color ? '✓ ' : '\u3000'}${c.key ? '● ' : '○ '}${c.label}</option>`).join('');
   $('#sel-bg').value = bg;
   $('#sel-bg').dataset.color = color;
   $('#editor').dataset.bg = bg;
@@ -876,6 +907,7 @@ async function deleteNote() {
   if (!n) return;
   await flushSave();
   if (n.trashedAt) return purgeNote();
+  if (!confirm(`'${titleOf(n)}' 노트를 휴지통으로 옮길까요?\n휴지통에서 ${TRASH_DAYS}일 동안 복원할 수 있고, 그 뒤 자동으로 영구 삭제됩니다.`)) return;
   n.trashedAt = Date.now();
   store.saveNote(n);
   await openNote(null);
@@ -960,7 +992,7 @@ $('#settings').addEventListener('close', async () => {
 /* ───────── 이벤트 연결 ───────── */
 document.addEventListener('click', async (e) => {
   const t = e.target;
-  if (!t.closest('#ctx-menu') && !t.closest('[data-folder-menu]')) $('#ctx-menu').hidden = true;
+  if (!t.closest('#ctx-menu') && !t.closest('[data-folder-menu]') && !t.closest('#btn-more')) $('#ctx-menu').hidden = true;
   const caret = t.closest('[data-collapse]');
   if (caret) return toggleCollapse(caret.dataset.collapse);
   const folder = t.closest('[data-folder]');
@@ -1025,10 +1057,12 @@ $('#btn-empty-trash').addEventListener('click', emptyTrash);
 $('#btn-new-folder').addEventListener('click', () => addFolder(state.filter));
 $('#btn-fav').addEventListener('click', toggleFav);
 $('#btn-delete').addEventListener('click', deleteNote);
+$('#btn-more').addEventListener('click', (e) => { const m = $('#ctx-menu'); if (!m.hidden && m.querySelector('[data-nm]')) { m.hidden = true; return; } noteMenu(e.currentTarget); });
 $('#btn-lock').addEventListener('click', toggleLock);
 $('#btn-print').addEventListener('click', printNote);
 $('#btn-history').addEventListener('click', openHistory);
 $('#btn-layout').addEventListener('click', cycleLayout);
+initNoteZoom();
 applyLayout();
 $('#sel-theme').value = getTheme();
 $('#sel-theme').addEventListener('change', (e) => setTheme(e.target.value));
@@ -1108,7 +1142,7 @@ window.addEventListener('pagehide', flushSave);
 
 /* ───────── 인쇄·PDF ───────── */
 async function printNote() {
-  resetZoom(); // 확대한 필기는 원래 크기로 인쇄
+  resetZoom(); // 확대한 필기는 원래 크기로 인쇄 (노트 배율은 인쇄용 스타일에서 100%)
   await flushAllDrawings();
   await flushSave();
   const n = current();

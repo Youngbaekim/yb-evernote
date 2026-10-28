@@ -173,9 +173,10 @@ class ImageView {
     let ht = h0;
     this.dom.classList.add('resizing');
     this.clip.classList.add('sized');
+    const zf = this.dom.currentCSSZoom || 1; // 노트 배율: 화면 이동량 → 그림 크기 단위
     const move = (ev) => {
-      const dx = ev.clientX - x0;
-      const dy = ev.clientY - y0;
+      const dx = (ev.clientX - x0) / zf;
+      const dy = (ev.clientY - y0) / zf;
       const sx = dir.includes('w') ? -dx : dir.includes('e') ? dx : 0;
       const sy = dir.includes('n') ? -dy : dir.includes('s') ? dy : 0;
       if (dir.length === 2) {

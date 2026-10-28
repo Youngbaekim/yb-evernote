@@ -116,10 +116,12 @@ button:disabled { cursor: default; opacity: .4; }
 .hl-none { background: transparent; border: 1px dashed var(--soft); font-size: 12px; color: var(--soft); line-height: 1; }
 
 /* 편집 본문 */
-.editor-wrap { flex: 1; min-height: 0; overflow: auto; background: var(--desk); }
+.editor-wrap { flex: 1; min-height: 0; overflow: auto; background: var(--desk); container-type: inline-size; touch-action: pan-x pan-y; }
 /* 쓰는 영역은 종이 한 장처럼: 바깥(책상)과 색·테두리·그림자로 구분 */
 /* 종이 크기 = A4 폭(210mm), 안쪽 여백 13mm → 인쇄했을 때와 줄바꿈이 같음 */
-.editor { max-width: 210mm; min-height: calc(100% - 48px); margin: 24px auto; padding: 13mm 13mm 120px; background: var(--paper); border: 1px solid var(--sheet-line); border-radius: 12px; box-shadow: var(--sheet-shadow); }
+/* 노트 영역이 A4보다 좁으면 좌우 여백이 폭에 비례해 13mm → 16px로 줄어듦 */
+.editor { --pad-x: clamp(16px, calc(16px + (100cqw - 360px) * 0.07), 13mm); --gap-x: clamp(10px, calc(10px + (100cqw - 360px) * 0.03), 24px); }
+.editor { max-width: 210mm; min-height: calc(100% - 48px); margin: 24px auto; padding: 13mm var(--pad-x) 120px; background: var(--paper); border: 1px solid var(--sheet-line); border-radius: 12px; box-shadow: var(--sheet-shadow); }
 .note-content { outline: none; font-size: 16px; line-height: 1.7; min-height: 60vh; word-break: keep-all; overflow-wrap: anywhere; }
 .note-content > * + * { margin-top: .5em; }
 .note-content p { margin: 0; }
@@ -177,7 +179,7 @@ button:disabled { cursor: default; opacity: .4; }
   .app[data-view='editor'] .pane-editor { display: flex; }
   .only-mobile { display: inline-block; }
   .sel-move { max-width: none; }
-  .editor { padding: 16px 16px 120px; margin: 10px; min-height: calc(100% - 20px); border-radius: 10px; }
+  .editor { padding: 16px var(--pad-x) 120px; margin: 10px; min-height: calc(100% - 20px); border-radius: 10px; }
   .save-state { display: none; }
 }
 
@@ -561,3 +563,36 @@ body.resizing-cols iframe, body.resizing-cols canvas { pointer-events: none; }
 }
 .sel-bg option { background: var(--pane); color: var(--ink); }
 @media print { .editor[data-color] { background: #fff !important; } }
+
+/* 바탕색 선택지: 펼친 목록에서 색이 보이도록 줄마다 색칠 (PC·Android 크롬/엣지. iPhone·iPad는 기기 고유 선택 창이라 글자만 표시) */
+.sel-bg option.c-cream { background: #fbe7a1; color: #16202b; }
+.sel-bg option.c-mint { background: #cde7c3; color: #16202b; }
+.sel-bg option.c-sky { background: #c6ddf4; color: #16202b; }
+.sel-bg option.c-rose { background: #f5cbd5; color: #16202b; }
+@media (prefers-color-scheme: dark) {
+  .sel-bg option.c-cream { background: #6b5a22; color: #f2f4f7; }
+  .sel-bg option.c-mint { background: #2f5a3a; color: #f2f4f7; }
+  .sel-bg option.c-sky { background: #2b4f78; color: #f2f4f7; }
+  .sel-bg option.c-rose { background: #6b3646; color: #f2f4f7; }
+}
+
+/* 휴대폰: 잠금·이전 버전·인쇄·삭제는 ⋯ 메뉴로 */
+@media (max-width: 680px) { .desk-act { display: none !important; } }
+.ctx-menu [data-nm] { white-space: nowrap; }
+
+/* 좁은 화면: 용지 좌우 바깥 여백도 함께 줄임 */
+@container (max-width: 860px) { .editor { margin-left: var(--gap-x); margin-right: var(--gap-x); } }
+
+/* 노트 배율: 내용(글자·그림)만 확대·축소, 용지 폭은 그대로 → 용지 안에서 다시 줄바꿈 */
+.note-content { zoom: var(--z, 1); }
+/* 필기는 배율과 관계없이 항상 용지 폭 (확대는 필기 블록 자체 기능으로) */
+.note-content .drawing-block { zoom: calc(1 / var(--z, 1)); }
+.zoom-group { display: inline-flex; align-items: center; gap: 0; border: 1px solid var(--line); border-radius: 8px; height: 30px; }
+.zoom-group button { height: 28px; padding: 0 7px; font-size: 15px; color: var(--soft); }
+.zoom-group button:hover:not(:disabled) { color: var(--accent); }
+.zoom-group .zoom-val { min-width: 46px; font-size: 12px; font-variant-numeric: tabular-nums; }
+.zoom-group.changed .zoom-val { color: var(--accent); font-weight: 700; }
+@media print { .note-content { zoom: 1 !important; } .note-content .drawing-block { zoom: 1 !important; } }
+.nm-zoom { display: flex; align-items: center; gap: 2px; padding: 4px 6px 8px; margin-bottom: 4px; border-bottom: 1px solid var(--line); font-size: 13px; color: var(--soft); }
+.nm-zoom span { flex: 1; }
+.nm-zoom button { min-width: 36px; padding: 6px 8px !important; text-align: center !important; font-size: 14px; color: var(--ink); border: 1px solid var(--line); }

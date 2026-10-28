@@ -60,10 +60,12 @@
           <option value="grid">모눈</option>
         </select>
         <select id="sel-move" class="sel-move" title="폴더 이동" disabled></select>
-        <button class="icon-btn" id="btn-lock" title="이 노트 잠그기" disabled>🔓</button>
-        <button class="icon-btn" id="btn-history" title="이전 버전 보기·복원" disabled>🕘</button>
-        <button class="icon-btn" id="btn-print" title="인쇄 · PDF로 저장" disabled>🖨</button>
-        <button class="icon-btn" id="btn-delete" title="휴지통으로" disabled>🗑</button>
+        <span class="zoom-group desk-act" id="zoom-group" title="노트 확대·축소 (노트 위에서 Ctrl+휠, 두 손가락 벌리기)"><button id="btn-zoom-out" aria-label="노트 축소">－</button><button id="btn-zoom-reset" class="zoom-val" title="100%로">100%</button><button id="btn-zoom-in" aria-label="노트 확대">＋</button></span>
+        <button class="icon-btn desk-act" id="btn-lock" title="이 노트 잠그기" disabled>🔓</button>
+        <button class="icon-btn desk-act" id="btn-history" title="이전 버전 보기·복원" disabled>🕘</button>
+        <button class="icon-btn desk-act" id="btn-print" title="인쇄 · PDF로 저장" disabled>🖨</button>
+        <button class="icon-btn desk-act" id="btn-delete" title="휴지통으로" disabled>🗑</button>
+        <button class="icon-btn only-mobile" id="btn-more" title="더보기 (잠금·이전 버전·인쇄·삭제)" disabled>⋯</button>
       </header>
       <div class="toolbar" id="toolbar" aria-label="도구 모음">
         <select id="sel-font" title="글꼴"></select>
