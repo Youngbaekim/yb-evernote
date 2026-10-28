@@ -8,7 +8,7 @@ import { newDrawingAttrs, flushAllDrawings, getDrawingView, resetZoom } from './
 import { makeSortable } from './sortable.js';
 import { DEVICE_ID } from './device.js';
 
-const VERSION = 'v0.6.2 · 6단계';
+const VERSION = 'v0.6.3 · 6단계';
 const $ = (sel) => document.querySelector(sel);
 const app = $('#app');
 
@@ -46,6 +46,10 @@ const stripTags = (title) => (title || '').replace(TAG_RE, '').replace(/\s{2,}/g
 const titleOf = (n) => stripTags(n.title) || n.preview?.split('\n')[0]?.slice(0, 40) || '제목 없음';
 
 /* ───────── 폴더 트리 ───────── */
+const SYS_FILTERS = ['all', 'fav', 'locked', 'trash', 'none']; // 폴더가 아닌 보기 (none = 폴더 미지정)
+const TRASH_DAYS = 30; // 휴지통 보관 기간
+const DAY = 86400000;
+const NOFOLDER_SVG = `<svg class="f-svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-dasharray="2.6 2.2" stroke-linejoin="round"><path d="M3 6.5A1.5 1.5 0 014.5 5h4l2 2h9A1.5 1.5 0 0121 8.5v9a1.5 1.5 0 01-1.5 1.5h-15A1.5 1.5 0 013 17.5z"/></svg>`;
 const FOLDER_SVG = `<svg class="f-svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M3 6.5A1.5 1.5 0 014.5 5h4l2 2h9A1.5 1.5 0 0121 8.5v9a1.5 1.5 0 01-1.5 1.5h-15A1.5 1.5 0 013 17.5z"/></svg>`;
 const folderById = (id) => state.folders.find((f) => f.id === id);
 const childrenOf = (pid) => state.folders.filter((f) => (f.parentId ?? null) === (pid ?? null));
@@ -337,6 +341,7 @@ function visibleNotes() {
     list = list.filter((n) => !n.trashedAt);
     if (state.filter === 'fav') list = list.filter((n) => n.fav);
     else if (state.filter === 'locked') list = list.filter((n) => n.locked);
+    else if (state.filter === 'none') list = list.filter((n) => !n.folderId || !state.folders.some((f) => f.id === n.folderId));
     else if (state.filter !== 'all') list = list.filter((n) => n.folderId === state.filter);
   }
   if (state.tag) list = list.filter((n) => tagsOf(n.title).includes(state.tag));
@@ -375,9 +380,9 @@ function between(prev, next) {
 function dropNote(srcId, target, place) {
   const n = state.notes.find((x) => x.id === srcId);
   if (!n) return;
-  // 왼쪽 폴더 위에 놓으면 그 폴더로 이동
-  if (target.dataset.fid) {
-    n.folderId = target.dataset.fid;
+  // 왼쪽 폴더 위에 놓으면 그 폴더로 이동 ('폴더 미지정'에 놓으면 폴더에서 빼기)
+  if (target.dataset.fid || target.dataset.nofolder) {
+    n.folderId = target.dataset.fid || null;
     store.updateFields('notes', n.id, { folderId: n.folderId });
     renderList();
     if (state.noteId === n.id) renderEditorHeader({ keepTitle: true });
@@ -456,6 +461,7 @@ function filterName() {
   if (state.filter === 'fav') return '즐겨찾기';
   if (state.filter === 'locked') return '잠긴 노트';
   if (state.filter === 'trash') return '휴지통';
+  if (state.filter === 'none') return '폴더 미지정';
   return folderPath(state.filter).map((f) => f.name).join(' › ') || '폴더';
 }
 
@@ -466,6 +472,7 @@ function renderFolders() {
     fav: live.filter((n) => n.fav).length,
     locked: live.filter((n) => n.locked).length,
     trash: state.notes.filter((n) => n.trashedAt).length,
+    none: live.filter((n) => !n.folderId || !state.folders.some((f) => f.id === n.folderId)).length,
   };
   const sys = [
     { id: 'all', name: '모든 노트', icon: '▤' },
@@ -483,6 +490,10 @@ function renderFolders() {
   $('#folder-nav').innerHTML =
     sys.map((f) => item(f, f.icon, count[f.id], false)).join('') +
     `<div class="nav-label"><span>폴더</span><button class="nav-add" id="btn-add-folder" title="최상위 폴더 만들기 (하위 폴더는 각 폴더의 ⋯ 또는 목록의 ＋ 폴더)">＋</button></div>` +
+    `<div class="folder-row nofolder-row ${state.filter === 'none' ? 'active' : ''}" data-nofolder="1" title="어느 폴더에도 넣지 않은 노트 (노트를 여기로 끌어 놓으면 폴더에서 빼기)">
+      <span class="f-caret-sp"></span>
+      <button class="folder" data-folder="none"><span class="f-icon">${NOFOLDER_SVG}</span><span class="f-name">폴더 미지정</span><span class="f-count">${count.none}</span></button>
+    </div>` +
     folderBranch(null, live);
 }
 
@@ -519,12 +530,13 @@ function renderList() {
   $('#note-list').classList.toggle('manual', sortSel.value === 'manual');
   renderTagSelect();
   $('#btn-new').hidden = state.filter === 'trash';
-  $('#btn-new-folder').hidden = ['all', 'fav', 'locked', 'trash'].includes(state.filter);
+  $('#btn-empty-trash').hidden = state.filter !== 'trash' || !state.notes.some((n) => n.trashedAt);
+  $('#btn-new-folder').hidden = SYS_FILTERS.includes(state.filter);
   const notes = visibleNotes();
   const live = state.notes.filter((n) => !n.trashedAt);
-  const isFolder = !['all', 'fav', 'locked', 'trash'].includes(state.filter);
+  const isFolder = !SYS_FILTERS.includes(state.filter);
   const subs = isFolder && !state.search.trim() ? childrenOf(state.filter) : [];
-  const empty = state.filter === 'trash' ? '휴지통이 비어 있습니다.' : '노트가 없습니다. ＋ 새 노트를 눌러 시작하세요.';
+  const empty = state.filter === 'trash' ? `휴지통이 비어 있습니다. 휴지통의 노트는 ${TRASH_DAYS}일 뒤 자동으로 영구 삭제됩니다.` : '노트가 없습니다. ＋ 새 노트를 눌러 시작하세요.';
   const subHtml = subs.length
     ? `<li class="sub-folders">${subs
         .map((f) => {
@@ -541,7 +553,7 @@ function renderList() {
         <button class="note-card ${state.noteId === n.id ? 'active' : ''}" data-note="${n.id}">
           <span class="nc-title">${n.fav ? '<span class="star">★</span> ' : ''}${n.locked ? '<span class="lock">🔒</span> ' : ''}${esc(titleOf(n))}${tagsOf(n.title).map((t) => `<span class="tag-chip" data-tag="${esc(t)}">#${esc(t)}</span>`).join('')}</span>
           <span class="nc-preview">${previewOf(n)}</span>
-          <span class="nc-meta">${fmtDate(n.updatedAt)}${n.folderId && state.filter === 'all' ? ' · ' + esc(folderPath(n.folderId).map((f) => f.name).join(' › ')) : ''}</span>
+          <span class="nc-meta">${n.trashedAt ? `<span class="trash-left">${daysLeft(n)}일 후 영구 삭제</span> · ` : ''}${fmtDate(n.updatedAt)}${n.folderId && state.filter === 'all' ? ' · ' + esc(folderPath(n.folderId).map((f) => f.name).join(' › ')) : ''}</span>
         </button>
       </li>`
         )
@@ -569,9 +581,7 @@ function renderEditorHeader({ keepTitle = false } = {}) {
   $('#btn-delete').title = trashed ? '영구 삭제' : '휴지통으로';
   $('#sel-move').disabled = !has || trashed;
   $('#sel-bg').disabled = !has || trashed;
-  const bg = note?.background ?? state.settings.textBackground; // 배경을 정하지 않은 노트는 설정의 기본 배경
-  $('#sel-bg').value = bg;
-  $('#editor').dataset.bg = bg;
+  renderBgSelect(note); // 배경을 정하지 않은 노트는 설정의 기본 배경
   $('#sel-move').innerHTML =
     `<option value="">미분류</option>` +
     folderTree().map(({ folder: f, depth }) => `<option value="${f.id}">${'\u3000'.repeat(depth)}${depth ? '└ ' : ''}${esc(f.name)}</option>`).join('');
@@ -581,7 +591,7 @@ function renderEditorHeader({ keepTitle = false } = {}) {
   if (trashed) {
     $('.editor-wrap').insertAdjacentHTML(
       'afterbegin',
-      `<div id="trash-banner" class="trash-banner">휴지통에 있는 노트입니다.
+      `<div id="trash-banner" class="trash-banner">휴지통에 있는 노트입니다. ${daysLeft(note)}일 후 영구 삭제됩니다.
         <button class="btn-text" id="btn-restore">복원</button>
         <button class="btn-text danger" id="btn-purge">영구 삭제</button></div>`
     );
@@ -670,13 +680,14 @@ async function reloadOpenNoteFromRemote() {
 const syncHandlers = {
   onFolders(list) {
     state.folders = list;
-    if (!['all', 'fav', 'locked', 'trash'].includes(state.filter) && !list.some((f) => f.id === state.filter)) state.filter = 'all';
+    if (!SYS_FILTERS.includes(state.filter) && !list.some((f) => f.id === state.filter)) state.filter = 'all';
     renderList();
     renderEditorHeader({ keepTitle: true });
   },
   onNotes(list, remoteIds) {
     state.notes = list;
     state.ready = true;
+    setTimeout(purgeExpired, 5000); // 앱을 열 때 한 번: 보관 기간이 지난 휴지통 노트 정리
     // 순서값이 없는 기존 노트: 지금 보이는 순서(수정일순)를 그대로 순서값으로 한 번 기록
     const missing = list.filter((n) => n.order == null);
     if (missing.length) {
@@ -719,7 +730,7 @@ window.addEventListener('offline', () => syncHandlers.onStatus({ pending: true }
 
 async function newNote() {
   await flushSave();
-  const folderId = ['all', 'fav', 'locked', 'trash'].includes(state.filter) ? null : state.filter;
+  const folderId = SYS_FILTERS.includes(state.filter) ? null : state.filter;
   const now = Date.now();
   const note = {
     id: store.newId('note'),
@@ -811,9 +822,39 @@ async function toggleFav() {
   renderEditorHeader({ keepTitle: true });
 }
 
+/* 노트 바탕색: 무늬(줄노트·무지·모눈)와 따로 저장, 다크 모드에서는 어두운 같은 계열로 */
+const PAPER_COLORS = [
+  { key: '', label: '기본 색' },
+  { key: 'cream', label: '노랑' },
+  { key: 'mint', label: '연두' },
+  { key: 'sky', label: '하늘' },
+  { key: 'rose', label: '분홍' },
+];
+function renderBgSelect(note) {
+  const bg = note?.background ?? state.settings.textBackground;
+  const color = note?.bgColor || '';
+  const pat = [['lined', '줄노트'], ['blank', '무지'], ['grid', '모눈']];
+  $('#sel-bg').innerHTML =
+    pat.map(([v, l]) => `<option value="${v}">${l}</option>`).join('') +
+    `<option disabled>──────</option>` +
+    PAPER_COLORS.map((c) => `<option value="c:${c.key}">${c.key === color ? '✓ ' : '\u3000'}${c.key ? '● ' : '○ '}${c.label}</option>`).join('');
+  $('#sel-bg').value = bg;
+  $('#sel-bg').dataset.color = color;
+  $('#editor').dataset.bg = bg;
+  $('#editor').dataset.color = color;
+}
+
 async function setNoteBackground(bg) {
   const n = current();
   if (!n) return;
+  if (bg.startsWith('c:')) {
+    n.bgColor = bg.slice(2) || null;
+    n.updatedAt = Date.now();
+    store.saveNote(n);
+    renderBgSelect(n); // 선택 상자는 무늬 표시로 되돌리고 색에 ✓
+    renderList();
+    return;
+  }
   n.background = bg;
   n.updatedAt = Date.now();
   store.saveNote(n);
@@ -856,6 +897,33 @@ async function purgeNote() {
   store.purgeNote(n.id);
   state.notes = state.notes.filter((x) => x.id !== n.id);
   await openNote(null);
+  setTimeout(refreshUsage, 3000);
+}
+
+/* ───────── 휴지통: 30일 지나면 자동 영구 삭제, 한 번에 비우기 ───────── */
+const daysLeft = (n) => Math.max(0, Math.ceil((n.trashedAt + TRASH_DAYS * DAY - Date.now()) / DAY));
+let expiredChecked = false;
+function purgeExpired() {
+  if (expiredChecked || !navigator.onLine) return;
+  expiredChecked = true;
+  const limit = Date.now() - TRASH_DAYS * DAY;
+  const old = state.notes.filter((n) => n.trashedAt && n.trashedAt < limit);
+  if (!old.length) return;
+  old.forEach((n) => store.purgeNote(n.id));
+  state.notes = state.notes.filter((n) => !old.includes(n));
+  if (old.some((n) => n.id === state.noteId)) openNote(null);
+  renderList();
+  setTimeout(refreshUsage, 3000);
+}
+
+async function emptyTrash() {
+  const list = state.notes.filter((n) => n.trashedAt);
+  if (!list.length) return;
+  if (!confirm(`휴지통의 노트 ${list.length}개를 모두 영구 삭제할까요?\n그림·필기·이전 버전도 함께 지워지며 되돌릴 수 없습니다.`)) return;
+  list.forEach((n) => store.purgeNote(n.id));
+  state.notes = state.notes.filter((n) => !n.trashedAt);
+  if (list.some((n) => n.id === state.noteId)) await openNote(null);
+  renderList();
   setTimeout(refreshUsage, 3000);
 }
 
@@ -953,6 +1021,7 @@ $('#toolbar').addEventListener('mousedown', (e) => {
 });
 
 $('#btn-new').addEventListener('click', newNote);
+$('#btn-empty-trash').addEventListener('click', emptyTrash);
 $('#btn-new-folder').addEventListener('click', () => addFolder(state.filter));
 $('#btn-fav').addEventListener('click', toggleFav);
 $('#btn-delete').addEventListener('click', deleteNote);
@@ -975,10 +1044,10 @@ $('#sel-sort').addEventListener('change', (e) => {
 makeSortable({
   root: $('#note-list'),
   item: '.note-card',
-  targets: '.note-card, .folder-row[data-fid]',
+  targets: '.note-card, .folder-row[data-fid], .folder-row[data-nofolder]',
   enabled: () => state.filter !== 'trash',
   places: (src, t) => {
-    if (t.dataset.fid) return ['inside'];
+    if (t.dataset.fid || t.dataset.nofolder) return ['inside'];
     return (state.settings.noteSort || 'manual') === 'manual' && !state.search.trim() ? ['before', 'after'] : [];
   },
   onDrop: (src, t, place) => dropNote(src.dataset.note, t, place),

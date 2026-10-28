@@ -532,3 +532,32 @@ body.is-dragging, body.is-dragging * { cursor: grabbing !important; }
 .app:not([data-cols='3']) .pane-folders > .pane-resizer, .app:is([data-cols='1'], [data-cols='m']) .pane-list > .pane-resizer { display: none; }
 body.resizing-cols { cursor: col-resize; user-select: none; }
 body.resizing-cols iframe, body.resizing-cols canvas { pointer-events: none; }
+
+/* 휴지통 */
+.danger-ghost { color: var(--danger) !important; border-color: var(--danger) !important; white-space: nowrap; }
+.trash-left { color: var(--danger); }
+/* 폴더 미지정 */
+.nofolder-row .f-name { color: var(--soft); }
+.nofolder-row.active .f-name { color: inherit; }
+
+/* 노트 바탕색 (다크 모드는 같은 계열의 어두운 색) */
+.editor[data-color='cream'] { --paper: #fff7dd; }
+.editor[data-color='mint'] { --paper: #edf6ea; }
+.editor[data-color='sky'] { --paper: #e9f2fb; }
+.editor[data-color='rose'] { --paper: #fbedf0; }
+.sel-bg[data-color='cream'] { background: #fff7dd; }
+.sel-bg[data-color='mint'] { background: #edf6ea; }
+.sel-bg[data-color='sky'] { background: #e9f2fb; }
+.sel-bg[data-color='rose'] { background: #fbedf0; }
+@media (prefers-color-scheme: dark) {
+  .editor[data-color='cream'] { --paper: #312b1c; }
+  .editor[data-color='mint'] { --paper: #1d2d22; }
+  .editor[data-color='sky'] { --paper: #1b2a3b; }
+  .editor[data-color='rose'] { --paper: #33232a; }
+  .sel-bg[data-color='cream'] { background: #312b1c; }
+  .sel-bg[data-color='mint'] { background: #1d2d22; }
+  .sel-bg[data-color='sky'] { background: #1b2a3b; }
+  .sel-bg[data-color='rose'] { background: #33232a; }
+}
+.sel-bg option { background: var(--pane); color: var(--ink); }
+@media print { .editor[data-color] { background: #fff !important; } }
