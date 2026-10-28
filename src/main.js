@@ -9,7 +9,7 @@ import { newDrawingAttrs, flushAllDrawings, getDrawingView, resetZoom } from './
 import { makeSortable } from './sortable.js';
 import { DEVICE_ID } from './device.js';
 
-const VERSION = 'v0.6.7 · 6단계';
+const VERSION = 'v0.6.8 · 6단계';
 const $ = (sel) => document.querySelector(sel);
 const app = $('#app');
 
@@ -117,6 +117,7 @@ async function flushSave() {
   note.updatedAt = Date.now();
   store.saveNote(note);
   setSaveState('저장됨');
+  if (note.id === state.noteId) document.title = `${titleOf(note)} - YB-EverNote`;
   renderList();
 }
 
@@ -194,11 +195,26 @@ async function openHistory() {
   };
 }
 
+/* ───────── 노트별 주소 (홈 화면 바로가기용) ─────────
+   노트를 열면 주소에 ?note=ID, 창 제목에 노트 제목 → 브라우저의 '홈 화면에 추가'가 이 노트로 바로가기를 만듦 */
+let pendingNoteId = new URL(location.href).searchParams.get('note'); // 바로가기로 앱을 연 경우
+function syncUrl(note) {
+  try {
+    const url = new URL(location.href);
+    if (note) url.searchParams.set('note', note.id);
+    else url.searchParams.delete('note');
+    if (url.href !== location.href) history.replaceState(null, '', url);
+  } catch { /* 무시 */ }
+  document.title = note ? `${titleOf(note)} - YB-EverNote` : 'YB-EverNote';
+}
+const noteUrl = (note) => { const u = new URL(location.href); u.search = ''; u.hash = ''; u.searchParams.set('note', note.id); return u.href; };
+
 async function openNote(id) {
   await flushAllDrawings();
   await flushSave();
   state.noteId = id;
   const note = current();
+  syncUrl(note);
   app.dataset.view = id ? 'editor' : 'list';
   renderList();
   renderEditorHeader();
@@ -690,6 +706,12 @@ const syncHandlers = {
     state.notes = list;
     state.ready = true;
     setTimeout(purgeExpired, 5000); // 앱을 열 때 한 번: 보관 기간이 지난 휴지통 노트 정리
+    if (pendingNoteId) {
+      const id = pendingNoteId;
+      pendingNoteId = null;
+      if (list.some((n) => n.id === id)) { openNote(id); return; }
+      syncUrl(null); // 지워진 노트의 바로가기
+    }
     // 순서값이 없는 기존 노트: 지금 보이는 순서(수정일순)를 그대로 순서값으로 한 번 기록
     const missing = list.filter((n) => n.order == null);
     if (missing.length) {
@@ -797,6 +819,7 @@ function noteMenu(anchor) {
     .filter((b) => !b.disabled)
     .map((b) => `<button data-nm="${b.id}" class="${b.id === 'btn-delete' ? 'danger' : ''}">${b.textContent} ${esc(b.title)}</button>`);
   if (!items.length) return;
+  items.push(`<button data-nm-sc="1">🔗 홈 화면 바로가기 만들기</button>`);
   const pct = Math.round(getZoom() * 100);
   items.unshift(`<div class="nm-zoom"><span>노트 배율</span><button data-nz="-1" aria-label="축소">－</button><button data-nz="0">${pct}%</button><button data-nz="1" aria-label="확대">＋</button></div>`);
   menu.innerHTML = items.join('');
@@ -812,10 +835,48 @@ function noteMenu(anchor) {
       menu.querySelector('[data-nz="0"]').textContent = `${Math.round(getZoom() * 100)}%`;
       return; // 메뉴는 열어 둔 채로 여러 번 조절
     }
+    if (e.target.closest('[data-nm-sc]')) { menu.hidden = true; return openShortcutGuide(); }
     const id = e.target.closest('[data-nm]')?.dataset.nm;
     menu.hidden = true;
     if (id) $('#' + id).click();
   };
+}
+
+/** 홈 화면 바로가기 안내 — 웹앱은 바로가기를 직접 만들 수 없어(브라우저만 가능) 기기·브라우저에 맞는 순서를 안내 */
+function openShortcutGuide() {
+  const note = current();
+  if (!note) return;
+  const ua = navigator.userAgent;
+  const android = /Android/i.test(ua);
+  const ios = /iPhone|iPad|iPod/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const samsung = /SamsungBrowser/i.test(ua);
+  const url = noteUrl(note);
+  let steps;
+  let openBtn = '';
+  if (android && isStandalone) {
+    const u = new URL(url);
+    const intent = `intent://${u.host}${u.pathname}${u.search}#Intent;scheme=https;package=com.android.chrome;end`;
+    openBtn = `<a class="btn-primary sc-open" href="${esc(intent)}">① Chrome에서 이 노트 열기</a>`;
+    steps = ['위 단추로 Chrome에서 이 노트를 엽니다.', 'Chrome 오른쪽 위 <b>⋮</b> → <b>홈 화면에 추가</b>를 누릅니다.', '이름을 확인하고 <b>추가</b>를 누릅니다.'];
+  } else if (android && samsung) {
+    steps = ['아래쪽 <b>≡</b> 메뉴 → <b>현재 페이지 추가</b>를 누릅니다.', '<b>홈 화면</b>을 고릅니다.'];
+  } else if (android) {
+    steps = ['오른쪽 위 <b>⋮</b> → <b>홈 화면에 추가</b>를 누릅니다.', '이름을 확인하고 <b>추가</b>를 누릅니다.'];
+  } else if (ios) {
+    steps = ['Safari 아래쪽 <b>공유(□↑)</b> → <b>홈 화면에 추가</b>를 누릅니다.', 'iPhone·iPad는 바로가기마다 따로 로그인해야 합니다.'];
+  } else {
+    steps = ['브라우저 메뉴에서 <b>바로가기 만들기</b> 또는 <b>홈 화면에 추가</b>를 고릅니다.'];
+  }
+  const dlg = $('#shortcut-dlg');
+  dlg.querySelector('.sc-body').innerHTML = `
+    <p class="hint"><b>${esc(titleOf(note))}</b> 노트를 바로 여는 아이콘을 홈 화면에 만듭니다.<br />휴대폰 보안 정책상 앱이 직접 만들 수는 없어, 브라우저 메뉴를 한 번 거칩니다.</p>
+    ${openBtn}
+    <ol class="sc-steps">${steps.map((t) => `<li>${t}</li>`).join('')}</ol>
+    <div class="sc-link"><input readonly value="${esc(url)}" /><button type="button" class="btn-ghost" data-sc-copy>링크 복사</button></div>`;
+  dlg.querySelector('[data-sc-copy]').onclick = async (e) => {
+    try { await navigator.clipboard.writeText(url); e.target.textContent = '복사됨'; } catch { dlg.querySelector('.sc-link input').select(); }
+  };
+  dlg.showModal();
 }
 
 function renameFolder(f) {
