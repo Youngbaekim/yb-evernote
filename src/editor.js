@@ -1,5 +1,5 @@
 // Tiptap 편집기 — 폰트·크기, 체크박스, 형광펜, 그림 붙여넣기
-import { Editor, Extension } from '@tiptap/core';
+import { Editor, Extension, textInputRule } from '@tiptap/core';
 import { Plugin, PluginKey } from '@tiptap/pm/state';
 import { Decoration, DecorationSet } from '@tiptap/pm/view';
 import StarterKit from '@tiptap/starter-kit';
@@ -265,6 +265,18 @@ export async function hydrateJSON(json) {
   return walk(json);
 }
 
+/* ── 화살표 자동 변환: --> → , <-- ← , ←> ↔ (바로 Backspace를 누르면 원래 글자로) ── */
+const Arrows = Extension.create({
+  name: 'arrows',
+  addInputRules() {
+    return [
+      textInputRule({ find: /-->$/, replace: '→' }),
+      textInputRule({ find: /<--$/, replace: '←' }),
+      textInputRule({ find: /←>$/, replace: '↔' }),
+    ];
+  },
+});
+
 /* ── 본문 검색어 표시 ── */
 const searchKey = new PluginKey('ybSearch');
 function buildHits(doc, term) {
@@ -352,6 +364,7 @@ export function createEditor(element, { onUpdate, getNoteId, onInk }) {
       NoteImage.configure({ resize: false }),
       Drawing.configure({ getNoteId, onInk }),
       SearchHighlight,
+      Arrows,
       Placeholder.configure({ placeholder: '내용을 입력하세요. 그림은 Ctrl+V로 붙여 넣을 수 있습니다.' }),
     ],
     editorProps: {
