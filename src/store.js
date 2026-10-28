@@ -65,7 +65,10 @@ export function startSync(userId, h) {
         .map((c) => c.doc.id);
       h.onNotes(list, remote);
       status(snap.metadata.fromCache);
-    }, report('노트 동기화'))
+    }, (err) => {
+      report('노트 동기화')(err);
+      if (err?.code === 'permission-denied') h.onDenied?.(); // 보안 규칙에서 허용되지 않은 계정
+    })
   );
 
   unsubs.push(
@@ -271,6 +274,8 @@ const migratedKey = () => `yb-migrated-${uid}`;
 export async function localDataSummary() {
   try {
     if (localStorage.getItem(migratedKey())) return null;
+    // 이 기기에서 이미 다른 계정으로 옮기거나 건너뛴 적이 있으면 묻지 않음 (가족이 같은 기기를 쓸 때 남의 옛 노트가 섞이지 않게)
+    if (Object.keys(localStorage).some((k) => k.startsWith('yb-migrated-'))) return null;
   } catch { /* 무시 */ }
   const all = await local.exportAll();
   const n = all.notes.length + all.folders.length;

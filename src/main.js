@@ -8,7 +8,7 @@ import { newDrawingAttrs, flushAllDrawings, getDrawingView, resetZoom } from './
 import { makeSortable } from './sortable.js';
 import { DEVICE_ID } from './device.js';
 
-const VERSION = 'v0.6.0 · 6단계';
+const VERSION = 'v0.6.2 · 6단계';
 const $ = (sel) => document.querySelector(sel);
 const app = $('#app');
 
@@ -696,6 +696,13 @@ const syncHandlers = {
       renderEditorHeader({ keepTitle: true });
     }
   },
+  onDenied() {
+    // 로그인은 됐지만 사용 허용 목록에 없는 계정
+    store.stopSync();
+    document.body.classList.add('signed-out');
+    $('#login-msg').innerHTML = `<b>${esc(state.user?.email || '')}</b><br />이 계정은 아직 사용 허용 목록에 없습니다.<br />관리자에게 이 Gmail 주소를 알려 주세요.<br /><button type="button" class="btn-text" id="btn-denied-out">다른 계정으로 로그인</button>`;
+    $('#btn-denied-out').onclick = async () => { await signOutUser(); $('#login-msg').textContent = ''; };
+  },
   onSettings(s) {
     state.settings = s;
     renderEditorHeader({ keepTitle: true });
@@ -1139,6 +1146,7 @@ async function offerMigration() {
 
 function onSignedIn(user) {
   state.user = user;
+  $('#login-msg').textContent = '';
   document.body.classList.remove('signed-out');
   $('#account').textContent = user.email;
   store.startSync(user.uid, syncHandlers);

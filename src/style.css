@@ -43,7 +43,7 @@ button:disabled { cursor: default; opacity: .4; }
 
 .app {
   display: grid;
-  grid-template-columns: 264px 320px 1fr;
+  grid-template-columns: var(--w-folders, 264px) var(--w-list, 320px) 1fr;
   height: 100dvh;
   padding-top: env(safe-area-inset-top);
 }
@@ -157,7 +157,7 @@ button:disabled { cursor: default; opacity: .4; }
 .only-narrow, .only-mobile { display: none; }
 
 /* 보기 단계 (data-cols: 3 · 2 · 1 · m=휴대폰) — 창 너비와 ◧ 단추에 따라 layout.js가 지정 */
-.app[data-cols='2'] { grid-template-columns: 300px 1fr; }
+.app[data-cols='2'] { grid-template-columns: var(--w-list, 320px) 1fr; }
 .app[data-cols='1'] { grid-template-columns: 1fr; }
 .app[data-cols='1'] .pane-list { display: none; }
 .app:is([data-cols='2'], [data-cols='1'], [data-cols='m']) .pane-folders { display: none; }
@@ -522,3 +522,13 @@ body.is-dragging, body.is-dragging * { cursor: grabbing !important; }
 .drawing-block.zoomed .ink-scroll { scrollbar-width: thin; }
 @media print { .ink-scroll { overflow: visible !important; } }
 .vh-acts .btn-text { font-size: 13px; }
+.login-msg { word-break: keep-all; line-height: 1.6; }
+
+/* 열 경계선 끌어서 너비 조절 */
+.pane-folders, .pane-list { position: relative; }
+.pane-resizer { position: absolute; top: 0; bottom: 0; right: -4px; width: 8px; z-index: 6; cursor: col-resize; touch-action: none; }
+.pane-resizer::after { content: ''; position: absolute; top: 0; bottom: 0; left: 3px; width: 2px; background: transparent; transition: background .15s; }
+.pane-resizer:hover::after, .pane-resizer.on::after { background: var(--accent); }
+.app:not([data-cols='3']) .pane-folders > .pane-resizer, .app:is([data-cols='1'], [data-cols='m']) .pane-list > .pane-resizer { display: none; }
+body.resizing-cols { cursor: col-resize; user-select: none; }
+body.resizing-cols iframe, body.resizing-cols canvas { pointer-events: none; }
