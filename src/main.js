@@ -9,7 +9,7 @@ import { newDrawingAttrs, flushAllDrawings, getDrawingView, resetZoom } from './
 import { makeSortable } from './sortable.js';
 import { DEVICE_ID } from './device.js';
 
-const VERSION = 'v0.6.8 · 6단계';
+const VERSION = 'v0.6.9 · 6단계';
 const $ = (sel) => document.querySelector(sel);
 const app = $('#app');
 
@@ -740,6 +740,7 @@ const syncHandlers = {
   },
   onSettings(s) {
     state.settings = s;
+    settingsLoaded = true;
     renderEditorHeader({ keepTitle: true });
   },
   onStatus({ pending }) {
@@ -1216,11 +1217,23 @@ async function printNote() {
 }
 
 /* ───────── 백업·복원 ───────── */
-const BACKUP_KEY = () => `yb-last-backup-${state.user?.uid}`;
+/* 백업 알림 규칙
+   - 마지막 백업 날짜는 계정 설정에 저장 → 어느 기기에서든 한 번 백업하면 모든 기기에 적용
+   - 마지막 백업 후 7일이 지나면 알림, '나중에'를 누르면 15일간 다시 묻지 않음 (이것도 계정 단위)
+   - 휴대폰에서는 알림을 띄우지 않음 (백업 파일 보관이 불편하므로 PC·태블릿에서) */
+const BACKUP_KEY = () => `yb-last-backup-${state.user?.uid}`; // 이전 버전(기기별 기록) 호환용
+const BACKUP_EVERY = 7 * DAY;
+const BACKUP_SNOOZE = 15 * DAY;
+let settingsLoaded = false;
+function lastBackupAt() {
+  let local = 0;
+  try { local = Number(localStorage.getItem(BACKUP_KEY()) || 0); } catch { /* 무시 */ }
+  return Math.max(Number(state.settings.lastBackupAt) || 0, local);
+}
+const isPhone = () => Math.min(screen.width, screen.height) < 600 || window.innerWidth <= 680;
 function lastBackupText() {
-  let t = 0;
-  try { t = Number(localStorage.getItem(BACKUP_KEY()) || 0); } catch { /* 무시 */ }
-  if (!t) return '이 기기에서 백업한 적 없음';
+  const t = lastBackupAt();
+  if (!t) return '백업한 적 없음';
   const days = Math.floor((Date.now() - t) / 86400000);
   return `마지막 백업: ${new Date(t).toLocaleDateString('ko-KR')} (${days ? `${days}일 전` : '오늘'})`;
 }
@@ -1239,7 +1252,8 @@ async function doBackup() {
     ($('dialog[open]') || document.body).appendChild(a); // 설정 창이 열려 있으면 그 안에서 눌러야 파일 이름이 유지됨
     a.click();
     setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 2000);
-    try { localStorage.setItem(BACKUP_KEY(), String(Date.now())); } catch { /* 무시 */ }
+    state.settings = { ...state.settings, lastBackupAt: Date.now(), backupSnoozeUntil: null };
+    store.saveSettings(state.settings); // 계정 단위 기록 → 다른 기기 알림도 함께 멈춤
     $('#last-backup').textContent = lastBackupText();
     alert(`백업 파일을 저장했습니다.\n노트 ${data.notes.length}개 · 폴더 ${data.folders.length}개 · 그림 ${data.images.length}장 · 필기 묶음 ${data.chunks.length}개`);
   } catch (err) {
@@ -1263,15 +1277,22 @@ $('#file-restore').addEventListener('change', async (e) => {
   alert('복원을 마쳤습니다.');
 });
 function backupReminder() {
-  let t = 0;
-  try { t = Number(localStorage.getItem(BACKUP_KEY()) || 0); } catch { /* 무시 */ }
-  if (state.notes.length < 3 || (t && Date.now() - t < 7 * 86400000)) return;
+  if (!settingsLoaded || isPhone() || state.notes.length < 3) return;
+  const now = Date.now();
+  const t = lastBackupAt();
+  if (t && now - t < BACKUP_EVERY) return;
+  if (Number(state.settings.backupSnoozeUntil) > now) return;
   const toast = $('#toast');
   if (!toast.hidden) return;
-  toast.innerHTML = `${t ? '마지막 백업 후 일주일이 지났습니다.' : '아직 백업 파일이 없습니다.'} <button class="btn-text" id="btn-backup-now">지금 백업</button><button class="btn-text" id="btn-backup-later">나중에</button>`;
+  const days = t ? Math.floor((now - t) / DAY) : 0;
+  toast.innerHTML = `${t ? `마지막 백업 후 ${days}일이 지났습니다.` : '아직 백업 파일이 없습니다.'} <button class="btn-text" id="btn-backup-now">지금 백업</button><button class="btn-text" id="btn-backup-later">나중에 (15일 뒤 다시)</button>`;
   toast.hidden = false;
   $('#btn-backup-now').onclick = () => { toast.hidden = true; doBackup(); };
-  $('#btn-backup-later').onclick = () => { toast.hidden = true; };
+  $('#btn-backup-later').onclick = () => {
+    toast.hidden = true;
+    state.settings = { ...state.settings, backupSnoozeUntil: now + BACKUP_SNOOZE };
+    store.saveSettings(state.settings);
+  };
 }
 
 /* ───────── 로그인 ───────── */

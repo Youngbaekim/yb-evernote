@@ -73,7 +73,7 @@ export function startSync(userId, h) {
 
   unsubs.push(
     onSnapshot(ref('settings', 'app'), (d) => {
-      if (d.exists()) h.onSettings({ ...local.DEFAULT_SETTINGS, ...(d.data().value || {}) });
+      h.onSettings({ ...local.DEFAULT_SETTINGS, ...(d.exists() ? d.data().value || {} : {}) }); // 설정이 없는 새 계정도 기본값으로
     }, report('설정 동기화'))
   );
 }
