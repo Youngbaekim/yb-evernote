@@ -9,7 +9,7 @@ import { newDrawingAttrs, flushAllDrawings, getDrawingView, resetZoom } from './
 import { makeSortable } from './sortable.js';
 import { DEVICE_ID } from './device.js';
 
-const VERSION = 'v0.7.0 · 7단계';
+const VERSION = 'v0.7.1 · 7단계';
 const $ = (sel) => document.querySelector(sel);
 const app = $('#app');
 
@@ -616,6 +616,10 @@ function editCreated() {
   input.value = toLocalInput(note.createdAt || note.updatedAt || Date.now());
   const preview = () => { const t = new Date(input.value).getTime(); $('#created-preview').textContent = Number.isFinite(t) ? `표시: ${fmtCreated(t)}` : '날짜와 시간을 정확히 입력해 주세요.'; };
   input.oninput = preview;
+  // 숫자를 고친 뒤 Enter = 저장 (폼 기본 동작은 첫 단추인 '취소'로 처리되므로 직접 지정)
+  input.onkeydown = (e) => {
+    if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); dlg.close('ok'); }
+  };
   $('#created-now').onclick = () => { input.value = toLocalInput(Date.now()); preview(); };
   preview();
   dlg.onclose = () => {

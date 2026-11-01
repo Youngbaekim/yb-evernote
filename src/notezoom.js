@@ -111,6 +111,26 @@ function applySheet(live) {
   shownScale = mx <= 1 ? 1 : Math.min(live ?? sheetScale, mx);
   ed.style.setProperty('--s', String(Math.round(shownScale * 1000) / 1000));
   ed.classList.toggle('can-grow', mx > 1.01);
+  placeGrips();
+}
+
+/** 손잡이 표시 위치: 용지가 길어도 늘 화면(노트 영역)에 보이는 부분의 세로 가운데 */
+let gripRaf = 0;
+function placeGrips() {
+  if (gripRaf) return;
+  gripRaf = requestAnimationFrame(() => {
+    gripRaf = 0;
+    const ed = sheet();
+    const w = wrap();
+    if (!ed || !w || ed.hidden) return;
+    const er = ed.getBoundingClientRect();
+    const wr = w.getBoundingClientRect();
+    const top = Math.max(er.top, wr.top);
+    const bottom = Math.min(er.bottom, wr.bottom);
+    if (bottom <= top) return;
+    const y = (top + bottom) / 2 - er.top; // 화면 좌표(배율 적용된 값)
+    ed.style.setProperty('--grip-y', `${Math.round(y / (shownScale || 1))}px`); // 용지 안 좌표로 환산
+  });
 }
 
 function initSheetGrips() {
@@ -159,6 +179,10 @@ function initSheetGrips() {
     ed.appendChild(g);
   }
   const w = wrap();
-  if (w) new ResizeObserver(() => applySheet()).observe(w);
+  if (w) {
+    new ResizeObserver(() => applySheet()).observe(w);
+    w.addEventListener('scroll', placeGrips, { passive: true });
+  }
+  new ResizeObserver(placeGrips).observe(ed); // 글이 길어지거나 노트를 바꿀 때
 }
 function saveSheet() { try { localStorage.setItem(SKEY, String(sheetScale)); } catch { /* 무시 */ } }

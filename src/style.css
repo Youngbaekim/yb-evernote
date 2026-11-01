@@ -608,7 +608,7 @@ body.resizing-cols iframe, body.resizing-cols canvas { pointer-events: none; }
 .editor { position: relative; zoom: var(--s, 1); }
 .sheet-grip { position: absolute; top: 0; bottom: 0; width: 12px; z-index: 3; cursor: ew-resize; touch-action: none; display: none; }
 .sheet-grip.left { left: -7px; } .sheet-grip.right { right: -7px; }
-.sheet-grip::after { content: ''; position: absolute; top: 40%; height: 64px; left: 4px; width: 4px; border-radius: 2px; background: var(--line); opacity: 0; transition: opacity .15s; }
+.sheet-grip::after { content: ''; position: absolute; top: var(--grip-y, 40%); transform: translateY(-50%); height: 64px; left: 4px; width: 4px; border-radius: 2px; background: var(--line); opacity: 0; transition: opacity .15s; }
 .editor.can-grow .sheet-grip { display: block; }
 .editor:hover .sheet-grip::after { opacity: .9; }
 .sheet-grip:hover::after, body.resizing-sheet .sheet-grip::after { background: var(--accent); opacity: 1; }
