@@ -9,7 +9,7 @@ import { newDrawingAttrs, flushAllDrawings, getDrawingView, resetZoom } from './
 import { makeSortable } from './sortable.js';
 import { DEVICE_ID } from './device.js';
 
-const VERSION = 'v0.7.6 · 7단계';
+const VERSION = 'v0.7.7 · 7단계';
 const $ = (sel) => document.querySelector(sel);
 const app = $('#app');
 
@@ -1089,20 +1089,11 @@ async function refreshUsage() {
 const TOPGAP_KEY = 'yb-top-gap';
 const isIPad = () => /iPad/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 function getTopGap() { try { return localStorage.getItem(TOPGAP_KEY) || 'auto'; } catch { return 'auto'; } }
-const CTL_KEY = 'yb-ctl-gap';
-function getCtlGap() { try { const v = localStorage.getItem(CTL_KEY); return v == null ? isIPad() && isStandalone : v === '1'; } catch { return false; } }
 function applyTopGap() {
   const v = getTopGap();
-  const px = v === 'auto' ? 0 : Number(v) || 0; // 자동 = 시스템 안전 영역(상태 표시줄 높이)만 따름
+  const px = v === 'auto' ? 0 : Number(v) || 0; // 자동 = 시스템 안전 영역만 따름
   document.documentElement.style.setProperty('--top-gap', `${px}px`);
-  // iPad 홈 화면 앱: 창 단추(●●●)가 겹치지 않게 맨 왼쪽 머리줄 앞을 비움 (기본 켬)
-  document.body.classList.toggle('ipad-app', isIPad() && isStandalone);
-  document.documentElement.style.setProperty('--ctl-gap', getCtlGap() ? '84px' : '0px');
 }
-$('#chk-ctlgap').addEventListener('change', (e) => {
-  try { localStorage.setItem(CTL_KEY, e.target.checked ? '1' : '0'); } catch { /* 무시 */ }
-  applyTopGap();
-});
 $('#sel-topgap').addEventListener('change', (e) => {
   try { localStorage.setItem(TOPGAP_KEY, e.target.value); } catch { /* 무시 */ }
   applyTopGap();
@@ -1118,8 +1109,6 @@ function openSettings() {
   $('#btn-pin').textContent = state.settings.pinHash ? '잠금 비밀번호 변경' : '잠금 비밀번호 정하기';
   $('#last-backup').textContent = lastBackupText();
   $('#sel-topgap').value = getTopGap();
-  $('#chk-ctlgap').checked = getCtlGap();
-  $('#chk-ctlgap').closest('label').hidden = !isIPad();
   dlg.showModal();
 }
 $('#settings').addEventListener('close', async () => {

@@ -637,8 +637,3 @@ body.resizing-sheet { cursor: ew-resize; user-select: none; }
 
 /* iPad 창 단추·상단 흐림 막 아래로 메뉴 내리기: 여백 부분은 머리줄과 같은 바탕색 */
 .app { background: var(--pane); }
-
-/* iPad 홈 화면 앱: 맨 윗줄은 시스템 상태 표시줄(창 단추 포함)과 공유 → 그 높이만큼 내리고, 창 단추 자리만큼 왼쪽을 비움 */
-body.ipad-app .app[data-cols='3'] .pane-folders > .pane-head,
-body.ipad-app .app[data-cols='2'] .pane-list > .pane-head,
-body.ipad-app .app[data-cols='1'] .pane-editor > .pane-head { padding-left: var(--ctl-gap, 0px); }
