@@ -134,6 +134,17 @@
         <label><input type="radio" name="background" value="grid" /> 모눈</label>
       </fieldset>
       <fieldset>
+        <legend>화면 위쪽 여백 <small>(이 기기에만 적용)</small></legend>
+        <select id="sel-topgap" class="sel-move" style="max-width:none">
+          <option value="auto">자동 (iPad 홈 화면 앱은 창 단추 자리만큼 띄움)</option>
+          <option value="0">없음</option>
+          <option value="24">작게</option>
+          <option value="40">보통</option>
+          <option value="56">크게</option>
+        </select>
+        <p class="hint">iPad에서 맨 위 메뉴가 창 단추(●●●)나 흐린 막에 가려지면 여백을 늘려 주세요.</p>
+      </fieldset>
+      <fieldset>
         <legend>앱 설치</legend>
         <button type="button" class="btn-primary" id="btn-install" hidden>이 기기에 앱으로 설치</button>
         <p id="ios-hint" class="hint" hidden>iPhone·iPad: Safari 아래쪽 <b>공유 버튼(□↑)</b> → <b>홈 화면에 추가</b></p>

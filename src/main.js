@@ -9,7 +9,7 @@ import { newDrawingAttrs, flushAllDrawings, getDrawingView, resetZoom } from './
 import { makeSortable } from './sortable.js';
 import { DEVICE_ID } from './device.js';
 
-const VERSION = 'v0.7.2 · 7단계';
+const VERSION = 'v0.7.3 · 7단계';
 const $ = (sel) => document.querySelector(sel);
 const app = $('#app');
 
@@ -1085,6 +1085,20 @@ async function refreshUsage() {
 }
 
 /* ───────── 설정 ───────── */
+/* 화면 위쪽 여백 (기기별): iPadOS 창 단추·상단 흐림 막이 맨 위 메뉴를 가리는 문제 대응 */
+const TOPGAP_KEY = 'yb-top-gap';
+const isIPad = () => /iPad/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+function getTopGap() { try { return localStorage.getItem(TOPGAP_KEY) || 'auto'; } catch { return 'auto'; } }
+function applyTopGap() {
+  const v = getTopGap();
+  const px = v === 'auto' ? (isIPad() && isStandalone ? 40 : 0) : Number(v) || 0;
+  document.documentElement.style.setProperty('--top-gap', `${px}px`);
+}
+$('#sel-topgap').addEventListener('change', (e) => {
+  try { localStorage.setItem(TOPGAP_KEY, e.target.value); } catch { /* 무시 */ }
+  applyTopGap();
+});
+
 function openSettings() {
   const s = state.settings;
   const dlg = $('#settings');
@@ -1094,6 +1108,7 @@ function openSettings() {
   $('#account-email').textContent = state.user?.email ?? '';
   $('#btn-pin').textContent = state.settings.pinHash ? '잠금 비밀번호 변경' : '잠금 비밀번호 정하기';
   $('#last-backup').textContent = lastBackupText();
+  $('#sel-topgap').value = getTopGap();
   dlg.showModal();
 }
 $('#settings').addEventListener('close', async () => {
@@ -1474,6 +1489,7 @@ const isStandalone = window.matchMedia('(display-mode: standalone)').matches || 
   registerServiceWorker();
   $('#ios-hint').hidden = !(isIOS && !isStandalone);
   document.body.classList.toggle('standalone', isStandalone);
+  applyTopGap();
   watchAuth((user) => (user ? onSignedIn(user) : onSignedOut()));
   if (navigator.storage?.persist) navigator.storage.persist().catch(() => {});
 })();

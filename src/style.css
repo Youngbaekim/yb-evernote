@@ -45,7 +45,7 @@ button:disabled { cursor: default; opacity: .4; }
   display: grid;
   grid-template-columns: var(--w-folders, 264px) var(--w-list, 320px) 1fr;
   height: 100dvh;
-  padding-top: env(safe-area-inset-top);
+  padding-top: max(env(safe-area-inset-top), var(--top-gap, 0px));
 }
 .pane { display: flex; flex-direction: column; min-width: 0; min-height: 0; border-right: 1px solid var(--line); background: var(--pane); }
 .pane-folders { background: var(--side); }
@@ -163,7 +163,7 @@ button:disabled { cursor: default; opacity: .4; }
 .app[data-cols='1'] { grid-template-columns: 1fr; }
 .app[data-cols='1'] .pane-list { display: none; }
 .app:is([data-cols='2'], [data-cols='1'], [data-cols='m']) .pane-folders { display: none; }
-.app:is([data-cols='2'], [data-cols='1'], [data-cols='m'])[data-view='folders'] .pane-folders { display: flex; position: fixed; inset: 0 auto 0 0; width: 260px; z-index: 10; box-shadow: 4px 0 20px rgba(0,0,0,.25); padding-top: env(safe-area-inset-top); }
+.app:is([data-cols='2'], [data-cols='1'], [data-cols='m'])[data-view='folders'] .pane-folders { display: flex; position: fixed; inset: 0 auto 0 0; width: 260px; z-index: 10; box-shadow: 4px 0 20px rgba(0,0,0,.25); padding-top: max(env(safe-area-inset-top), var(--top-gap, 0px)); }
 .app:is([data-cols='2'], [data-cols='1'], [data-cols='m'])[data-view='folders'] .scrim { display: block; position: fixed; inset: 0; z-index: 9; background: rgba(0,0,0,.3); }
 .app:is([data-cols='2'], [data-cols='m']) .only-narrow { display: inline-block; }
 .app[data-cols='m'] .only-desk { display: none; }
@@ -637,3 +637,6 @@ body.resizing-sheet { cursor: ew-resize; user-select: none; }
 .list-reopen:hover { background: var(--accent); color: #fff; width: 20px; }
 .app.list-collapsed .list-reopen { display: grid; place-items: center; }
 @media print { .list-reopen { display: none !important; } }
+
+/* iPad 창 단추·상단 흐림 막 아래로 메뉴 내리기: 여백 부분은 머리줄과 같은 바탕색 */
+.app { background: var(--pane); }
