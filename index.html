@@ -180,6 +180,19 @@
       <div class="row-btns" style="justify-content:flex-end;margin-top:12px"><button class="btn-ghost" value="close">닫기</button></div>
     </form>
   </dialog>
+  <dialog id="created-dlg" class="settings">
+    <form method="dialog" class="created-form">
+      <h3>노트 만든 시간</h3>
+      <p class="hint">다른 곳에서 옮겨 온 노트는 원래 쓴 시간으로 바꿀 수 있습니다. '만든 날짜순' 정렬에 그대로 반영됩니다.</p>
+      <input type="datetime-local" id="created-input" step="60" />
+      <div class="preview" id="created-preview"></div>
+      <div class="row-btns" style="justify-content:flex-end">
+        <button type="button" class="btn-ghost" id="created-now">지금 시각</button>
+        <button class="btn-ghost" value="cancel">취소</button>
+        <button class="btn-primary" value="ok" id="created-ok">저장</button>
+      </div>
+    </form>
+  </dialog>
   <script type="module" src="/src/main.js"></script>
 </body>
 </html>

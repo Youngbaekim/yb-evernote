@@ -586,13 +586,13 @@ body.resizing-cols iframe, body.resizing-cols canvas { pointer-events: none; }
 /* 노트 배율: 내용(글자·그림)만 확대·축소, 용지 폭은 그대로 → 용지 안에서 다시 줄바꿈 */
 .note-content { zoom: var(--z, 1); }
 /* 필기는 배율과 관계없이 항상 용지 폭 (확대는 필기 블록 자체 기능으로) */
-.note-content .drawing-block { zoom: calc(1 / var(--z, 1)); }
+.note-content .drawing-block { zoom: calc(1 / (var(--z, 1) * var(--s, 1))); }
 .zoom-group { display: inline-flex; align-items: center; gap: 0; border: 1px solid var(--line); border-radius: 8px; height: 30px; }
 .zoom-group button { height: 28px; padding: 0 7px; font-size: 15px; color: var(--soft); }
 .zoom-group button:hover:not(:disabled) { color: var(--accent); }
 .zoom-group .zoom-val { min-width: 46px; font-size: 12px; font-variant-numeric: tabular-nums; }
 .zoom-group.changed .zoom-val { color: var(--accent); font-weight: 700; }
-@media print { .note-content { zoom: 1 !important; } .note-content .drawing-block { zoom: 1 !important; } }
+@media print { .note-content { zoom: 1 !important; } .note-content .drawing-block { zoom: 1 !important; } .editor { zoom: 1 !important; } }
 .nm-zoom { display: flex; align-items: center; gap: 2px; padding: 4px 6px 8px; margin-bottom: 4px; border-bottom: 1px solid var(--line); font-size: 13px; color: var(--soft); }
 .nm-zoom span { flex: 1; }
 .nm-zoom button { min-width: 36px; padding: 6px 8px !important; text-align: center !important; font-size: 14px; color: var(--ink); border: 1px solid var(--line); }
@@ -603,3 +603,26 @@ body.resizing-cols iframe, body.resizing-cols canvas { pointer-events: none; }
 .sc-link { display: flex; gap: 6px; }
 .sc-link input { flex: 1; min-width: 0; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--pane); font-size: 12px; color: var(--soft); }
 .settings .hint { word-break: keep-all; }
+
+/* 용지 크기 (좌우 가장자리 끌기) */
+.editor { position: relative; zoom: var(--s, 1); }
+.sheet-grip { position: absolute; top: 0; bottom: 0; width: 12px; z-index: 3; cursor: ew-resize; touch-action: none; display: none; }
+.sheet-grip.left { left: -7px; } .sheet-grip.right { right: -7px; }
+.sheet-grip::after { content: ''; position: absolute; top: 40%; height: 64px; left: 4px; width: 4px; border-radius: 2px; background: var(--line); opacity: 0; transition: opacity .15s; }
+.editor.can-grow .sheet-grip { display: block; }
+.editor:hover .sheet-grip::after { opacity: .9; }
+.sheet-grip:hover::after, body.resizing-sheet .sheet-grip::after { background: var(--accent); opacity: 1; }
+body.resizing-sheet { cursor: ew-resize; user-select: none; }
+.sheet-tip { position: absolute; top: 8px; left: 50%; transform: translateX(-50%); z-index: 4; padding: 3px 10px; border-radius: 12px; background: var(--accent); color: #fff; font-size: 12px; font-weight: 600; pointer-events: none; }
+@media (hover: none) { .sheet-grip::after { opacity: .7; } }
+@media print { .sheet-grip, .sheet-tip { display: none !important; } }
+
+/* 노트 만든 시간 (용지 오른쪽 위, 눌러서 수정) */
+.note-created { position: absolute; top: 4.2mm; right: var(--pad-x); z-index: 2; padding: 2px 6px; border-radius: 6px; font-size: 12px; color: var(--soft); font-variant-numeric: tabular-nums; letter-spacing: .01em; }
+.note-created:hover:not(:disabled) { background: var(--accent-soft); color: var(--accent); }
+.note-created:disabled { opacity: .8; }
+@media (max-width: 680px) { .editor { padding-top: 34px !important; } .note-created { top: 8px; } }
+@media print { .note-created { color: #555 !important; background: none !important; } }
+.created-form { display: flex; flex-direction: column; gap: 10px; }
+.created-form input { padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--pane); color: var(--ink); font-size: 15px; }
+.created-form .preview { font-size: 13px; color: var(--soft); }

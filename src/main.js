@@ -9,7 +9,7 @@ import { newDrawingAttrs, flushAllDrawings, getDrawingView, resetZoom } from './
 import { makeSortable } from './sortable.js';
 import { DEVICE_ID } from './device.js';
 
-const VERSION = 'v0.6.9 · 6단계';
+const VERSION = 'v0.7.0 · 7단계';
 const $ = (sel) => document.querySelector(sel);
 const app = $('#app');
 
@@ -379,7 +379,7 @@ function sortNotes(list) {
   const by = {
     manual: (a, b) => noteOrder(a) - noteOrder(b),
     updated: (a, b) => b.updatedAt - a.updatedAt,
-    created: (a, b) => b.createdAt - a.createdAt,
+    created: (a, b) => (b.createdAt || b.updatedAt || 0) - (a.createdAt || a.updatedAt || 0),
     title: (a, b) => titleOf(a).localeCompare(titleOf(b), 'ko'),
   }[mode] || ((a, b) => noteOrder(a) - noteOrder(b));
   return [...list].sort(by);
@@ -570,7 +570,7 @@ function renderList() {
         <button class="note-card ${state.noteId === n.id ? 'active' : ''}" data-note="${n.id}">
           <span class="nc-title">${n.fav ? '<span class="star">★</span> ' : ''}${n.locked ? '<span class="lock">🔒</span> ' : ''}${esc(titleOf(n))}${tagsOf(n.title).map((t) => `<span class="tag-chip" data-tag="${esc(t)}">#${esc(t)}</span>`).join('')}</span>
           <span class="nc-preview">${previewOf(n)}</span>
-          <span class="nc-meta">${n.trashedAt ? `<span class="trash-left">${daysLeft(n)}일 후 영구 삭제</span> · ` : ''}${fmtDate(n.updatedAt)}${n.folderId && state.filter === 'all' ? ' · ' + esc(folderPath(n.folderId).map((f) => f.name).join(' › ')) : ''}</span>
+          <span class="nc-meta">${n.trashedAt ? `<span class="trash-left">${daysLeft(n)}일 후 영구 삭제</span> · ` : ''}${state.settings.noteSort === 'created' ? `만든 ${fmtDate(n.createdAt || n.updatedAt)}` : fmtDate(n.updatedAt)}${n.folderId && state.filter === 'all' ? ' · ' + esc(folderPath(n.folderId).map((f) => f.name).join(' › ')) : ''}</span>
         </button>
       </li>`
         )
@@ -579,10 +579,64 @@ function renderList() {
   renderFolders();
 }
 
+/* ───────── 노트 만든 시간 (용지 오른쪽 위) ───────── */
+const WEEK = ['일요일', '월요일', '화요일', '수요일', '목요일', '금요일', '토요일'];
+const p2 = (n) => String(n).padStart(2, '0');
+function fmtCreated(ts) {
+  const d = new Date(ts);
+  return `${d.getFullYear()}.${p2(d.getMonth() + 1)}.${p2(d.getDate())} ${WEEK[d.getDay()]} ${p2(d.getHours())}:${p2(d.getMinutes())}`;
+}
+const toLocalInput = (ts) => { const d = new Date(ts); return `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}T${p2(d.getHours())}:${p2(d.getMinutes())}`; };
+function createdLabel() {
+  let el = document.getElementById('note-created');
+  if (!el) {
+    el = document.createElement('button');
+    el.id = 'note-created';
+    el.className = 'note-created';
+    el.type = 'button';
+    el.addEventListener('click', editCreated);
+    $('#editor').prepend(el);
+  }
+  return el;
+}
+function renderCreated(note) {
+  const el = createdLabel();
+  el.hidden = !note;
+  if (!note) return;
+  const ts = note.createdAt || note.updatedAt || Date.now();
+  el.textContent = fmtCreated(ts);
+  el.disabled = !!note.trashedAt;
+  el.title = note.trashedAt ? '만든 시간' : '만든 시간 — 눌러서 수정 (만든 날짜순 정렬에 반영)';
+}
+function editCreated() {
+  const note = current();
+  if (!note || note.trashedAt) return;
+  const dlg = $('#created-dlg');
+  const input = $('#created-input');
+  input.value = toLocalInput(note.createdAt || note.updatedAt || Date.now());
+  const preview = () => { const t = new Date(input.value).getTime(); $('#created-preview').textContent = Number.isFinite(t) ? `표시: ${fmtCreated(t)}` : '날짜와 시간을 정확히 입력해 주세요.'; };
+  input.oninput = preview;
+  $('#created-now').onclick = () => { input.value = toLocalInput(Date.now()); preview(); };
+  preview();
+  dlg.onclose = () => {
+    if (dlg.returnValue !== 'ok') return;
+    const t = new Date(input.value).getTime();
+    const n = current();
+    if (!Number.isFinite(t) || !n || n.id !== note.id) return;
+    n.createdAt = t;
+    store.updateFields('notes', n.id, { createdAt: t }); // 수정일은 그대로, 만든 시간만
+    renderCreated(n);
+    renderList();
+  };
+  dlg.returnValue = '';
+  dlg.showModal();
+}
+
 function renderEditorHeader({ keepTitle = false } = {}) {
   const note = current();
   const has = !!note;
   const trashed = !!note?.trashedAt;
+  renderCreated(note);
   $('#note-title').disabled = !has || trashed;
   if (!keepTitle) $('#note-title').value = note?.title ?? '';
   $('#btn-fav').disabled = !has || trashed;
