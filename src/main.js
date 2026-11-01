@@ -9,7 +9,7 @@ import { newDrawingAttrs, flushAllDrawings, getDrawingView, resetZoom } from './
 import { makeSortable } from './sortable.js';
 import { DEVICE_ID } from './device.js';
 
-const VERSION = 'v0.7.5 · 7단계';
+const VERSION = 'v0.7.6 · 7단계';
 const $ = (sel) => document.querySelector(sel);
 const app = $('#app');
 

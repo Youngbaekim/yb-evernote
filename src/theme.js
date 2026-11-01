@@ -27,7 +27,22 @@ export function applyTheme(mode = getTheme()) {
   const root = document.documentElement;
   root.style.colorScheme = mode === 'system' ? '' : mode; // 스크롤바·입력칸 색도 함께
   root.dataset.theme = mode;
+  syncTitleBar();
 }
+
+/** 설치한 앱의 창 제목 띠(PC)·상태 표시줄(모바일) 색을 지금 화면의 머리줄 색에 맞춤 */
+function syncTitleBar() {
+  const color = getComputedStyle(document.documentElement).getPropertyValue('--pane').trim() || '#ffffff';
+  let meta = document.querySelector('meta[name="theme-color"]');
+  if (!meta) {
+    meta = document.createElement('meta');
+    meta.name = 'theme-color';
+    document.head.appendChild(meta);
+  }
+  meta.setAttribute('content', color);
+}
+// '시스템 설정 사용'일 때 기기의 밝은·어두운 모드가 바뀌면 함께 바뀌도록
+try { window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => syncTitleBar()); } catch { /* 무시 */ }
 
 export function setTheme(mode) {
   try { localStorage.setItem(KEY, mode); } catch { /* 무시 */ }
