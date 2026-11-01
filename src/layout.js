@@ -9,6 +9,10 @@ const DEF = { folders: 264, list: 320 };
 const LIMIT = { folders: [180, 420], list: [220, 600] };
 const EDITOR_MIN = 420; // 노트 영역 최소 너비
 const SHEET = 856; // A4 용지(약 794)와 여백
+// 목록 접기: 경계선을 최소 너비보다 더 밀면 목록을 완전히 숨김 → 노트 왼쪽 가장자리 손잡이로 다시 열기
+const CKEY = 'yb-list-collapsed';
+const COLLAPSE_PAST = 70; // 최소 너비에서 이만큼 더 밀면 접힘
+let listCollapsed = (() => { try { return localStorage.getItem(CKEY) === '1'; } catch { return false; } })();
 let widths = (() => { try { return { ...DEF, ...JSON.parse(localStorage.getItem(WKEY) || '{}') }; } catch { return { ...DEF }; } })();
 // 이 너비 이상이면 3열 (기본 1440). 열을 좁히면 더 좁은 창에서도 3열, 넓혀도 갑자기 2열로 바뀌지는 않음
 const wideAt = () => Math.min(DEF.folders + DEF.list, widths.folders + widths.list) + SHEET;
@@ -43,6 +47,8 @@ export function applyLayout() {
   if (!app) return;
   const eff = effective();
   app.dataset.cols = String(eff);
+  // 목록 접힘: 2·3열에서 노트가 열려 있을 때만 (열린 노트가 없으면 고를 수 있게 목록을 보여 줌)
+  app.classList.toggle('list-collapsed', listCollapsed && (eff === 2 || eff === 3) && hasNote());
   app.style.setProperty('--w-folders', `${widths.folders}px`);
   app.style.setProperty('--w-list', `${widths.list}px`);
   ensureResizers(app);
@@ -68,6 +74,7 @@ export function cycleLayout() {
   if (effective() === 'm') return;
   mode = nextMode();
   try { localStorage.setItem(KEY, String(mode)); } catch { /* 무시 */ }
+  setCollapsed(false); // 보기 전환 단추를 쓰면 접힘은 풀고 정해진 단계대로
   const app = document.getElementById('app');
   if (app && app.dataset.view === 'folders') app.dataset.view = 'list'; // 열린 서랍은 닫기
   applyLayout();
@@ -92,46 +99,88 @@ function ensureResizers(app) {
     });
     pane.appendChild(h);
   }
+  ensureReopenHandle(app);
+}
+
+function setCollapsed(v) {
+  listCollapsed = v;
+  try { localStorage.setItem(CKEY, v ? '1' : '0'); } catch { /* 무시 */ }
+}
+
+/** 노트 왼쪽 가장자리의 '목록 다시 열기' 손잡이: 누르면 최소 너비로 바로 열리고, 그대로 끌면 계속 넓어짐 */
+function ensureReopenHandle(app) {
+  const pane = app.querySelector('.pane-editor');
+  if (!pane || pane.querySelector(':scope > .list-reopen')) return;
+  const h = document.createElement('button');
+  h.type = 'button';
+  h.className = 'list-reopen';
+  h.title = '노트 목록 열기 (끌어서 너비 조절)';
+  h.setAttribute('aria-label', '노트 목록 열기');
+  h.innerHTML = '<span>›</span>';
+  h.addEventListener('pointerdown', (e) => {
+    if (e.button > 0) return;
+    e.preventDefault();
+    setCollapsed(false);
+    widths.list = LIMIT.list[0]; // 최소 너비로 한 번에 열기
+    applyLayout();
+    startResize(e, 'list', null, LIMIT.list[0]); // 이어서 끌면 그대로 너비 조절
+  });
+  pane.appendChild(h);
 }
 
 function saveWidths() {
   try { localStorage.setItem(WKEY, JSON.stringify(widths)); } catch { /* 무시 */ }
 }
 
-function startResize(e, kind, h) {
+function startResize(e, kind, h, w0Override) {
   if (e.button > 0) return;
   e.preventDefault();
   const app = document.getElementById('app');
   const x0 = e.clientX;
-  const w0 = widths[kind];
+  const w0 = w0Override ?? widths[kind];
   const cols = app.dataset.cols;
   // 노트 영역이 너무 좁아지지 않게 (나머지 열 너비를 뺀 범위 안에서)
   const others = kind === 'folders' ? widths.list : cols === '3' ? widths.folders : 0;
   const [lo, hi0] = LIMIT[kind];
   const hi = Math.max(lo, Math.min(hi0, window.innerWidth - others - EDITOR_MIN));
-  try { h.setPointerCapture(e.pointerId); } catch { /* 무시 */ }
   document.body.classList.add('resizing-cols');
-  h.classList.add('on');
+  h?.classList.add('on');
   let raf = 0;
+  let collapsing = false;
   const move = (ev) => {
-    widths[kind] = Math.round(Math.min(hi, Math.max(lo, w0 + ev.clientX - x0)));
+    const raw = w0 + ev.clientX - x0;
+    if (kind === 'list') {
+      // 최소 너비보다 더 밀면 목록 접기 (다시 당기면 최소 너비로 복귀)
+      const c = raw < lo - COLLAPSE_PAST;
+      if (c !== collapsing) {
+        collapsing = c;
+        app.classList.toggle('list-collapsed', c);
+      }
+      if (c) return;
+    }
+    widths[kind] = Math.round(Math.min(hi, Math.max(lo, raw)));
     if (!raf) raf = requestAnimationFrame(() => {
       raf = 0;
       app.style.setProperty(`--w-${kind}`, `${widths[kind]}px`);
     });
   };
   const up = () => {
-    h.removeEventListener('pointermove', move);
-    h.removeEventListener('pointerup', up);
-    h.removeEventListener('pointercancel', up);
+    window.removeEventListener('pointermove', move);
+    window.removeEventListener('pointerup', up);
+    window.removeEventListener('pointercancel', up);
     document.body.classList.remove('resizing-cols');
-    h.classList.remove('on');
+    h?.classList.remove('on');
+    if (kind === 'list') {
+      setCollapsed(collapsing);
+      if (collapsing) widths.list = Math.max(lo, w0); // 다음에 열 때를 위해 너비는 정상 범위로
+    }
     saveWidths();
     applyLayout();
   };
-  h.addEventListener('pointermove', move);
-  h.addEventListener('pointerup', up);
-  h.addEventListener('pointercancel', up);
+  // 창 전체에서 추적 (손잡이가 사라지거나 바뀌어도 끌기가 이어지도록)
+  window.addEventListener('pointermove', move);
+  window.addEventListener('pointerup', up);
+  window.addEventListener('pointercancel', up);
 }
 
 window.addEventListener('resize', applyLayout);
