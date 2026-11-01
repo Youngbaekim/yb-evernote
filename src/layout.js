@@ -9,10 +9,12 @@ const DEF = { folders: 264, list: 320 };
 const LIMIT = { folders: [180, 420], list: [220, 600] };
 const EDITOR_MIN = 420; // 노트 영역 최소 너비
 const SHEET = 856; // A4 용지(약 794)와 여백
-// 목록 접기: 경계선을 최소 너비보다 더 밀면 목록을 완전히 숨김 → 노트 왼쪽 가장자리 손잡이로 다시 열기
-const CKEY = 'yb-list-collapsed';
+// 목록 접기 = '노트만' 보기와 같은 상태 (◧ 아이콘·손잡이가 늘 일치)
+// - 경계선을 최소 너비보다 더 밀면 '노트만'으로 전환 (3열이면 폴더 열도 함께 숨김)
+// - '노트만' 상태에서는 노트 왼쪽 가장자리에 손잡이가 늘 보이고, 끌거나 누르면 접기 전 보기로 복귀
+const PKEY = 'yb-layout-prev';
 const COLLAPSE_PAST = 70; // 최소 너비에서 이만큼 더 밀면 접힘
-let listCollapsed = (() => { try { return localStorage.getItem(CKEY) === '1'; } catch { return false; } })();
+let prevMode = (() => { try { return Number(localStorage.getItem(PKEY)) || 3; } catch { return 3; } })();
 let widths = (() => { try { return { ...DEF, ...JSON.parse(localStorage.getItem(WKEY) || '{}') }; } catch { return { ...DEF }; } })();
 // 이 너비 이상이면 3열 (기본 1440). 열을 좁히면 더 좁은 창에서도 3열, 넓혀도 갑자기 2열로 바뀌지는 않음
 const wideAt = () => Math.min(DEF.folders + DEF.list, widths.folders + widths.list) + SHEET;
@@ -20,6 +22,13 @@ const MOBILE = 680;
 const LABEL = { 3: '폴더·목록·노트', 2: '목록·노트', 1: '노트만' };
 
 let mode = (() => { try { return Number(localStorage.getItem(KEY)) || 3; } catch { return 3; } })();
+// 이전 버전의 '목록 접힘' 기록은 '노트만'으로 옮김
+try { if (localStorage.getItem('yb-list-collapsed') === '1') { prevMode = mode === 1 ? 3 : mode; mode = 1; localStorage.setItem(KEY, '1'); } localStorage.removeItem('yb-list-collapsed'); } catch { /* 무시 */ }
+function setMode(m) {
+  if (m === 1 && mode !== 1) { prevMode = mode; try { localStorage.setItem(PKEY, String(prevMode)); } catch { /* 무시 */ } }
+  mode = m;
+  try { localStorage.setItem(KEY, String(mode)); } catch { /* 무시 */ }
+}
 
 const hasNote = () => { const t = document.getElementById('note-title'); return !!t && !t.disabled; }; // 열린 노트가 있으면 제목 칸이 켜져 있음
 
@@ -47,8 +56,6 @@ export function applyLayout() {
   if (!app) return;
   const eff = effective();
   app.dataset.cols = String(eff);
-  // 목록 접힘: 2·3열에서 노트가 열려 있을 때만 (열린 노트가 없으면 고를 수 있게 목록을 보여 줌)
-  app.classList.toggle('list-collapsed', listCollapsed && (eff === 2 || eff === 3) && hasNote());
   app.style.setProperty('--w-folders', `${widths.folders}px`);
   app.style.setProperty('--w-list', `${widths.list}px`);
   ensureResizers(app);
@@ -72,9 +79,7 @@ function nextMode() {
 
 export function cycleLayout() {
   if (effective() === 'm') return;
-  mode = nextMode();
-  try { localStorage.setItem(KEY, String(mode)); } catch { /* 무시 */ }
-  setCollapsed(false); // 보기 전환 단추를 쓰면 접힘은 풀고 정해진 단계대로
+  setMode(nextMode());
   const app = document.getElementById('app');
   if (app && app.dataset.view === 'folders') app.dataset.view = 'list'; // 열린 서랍은 닫기
   applyLayout();
@@ -102,12 +107,8 @@ function ensureResizers(app) {
   ensureReopenHandle(app);
 }
 
-function setCollapsed(v) {
-  listCollapsed = v;
-  try { localStorage.setItem(CKEY, v ? '1' : '0'); } catch { /* 무시 */ }
-}
-
-/** 노트 왼쪽 가장자리의 '목록 다시 열기' 손잡이: 누르면 최소 너비로 바로 열리고, 그대로 끌면 계속 넓어짐 */
+/** 노트 왼쪽 가장자리의 '목록 다시 열기' 손잡이 ('노트만' 상태에서 늘 표시)
+ *  누르면 접기 전 보기로 돌아가며 목록은 최소 너비로 바로 열리고, 그대로 끌면 계속 넓어짐 (◧ 아이콘도 같이 바뀜) */
 function ensureReopenHandle(app) {
   const pane = app.querySelector('.pane-editor');
   if (!pane || pane.querySelector(':scope > .list-reopen')) return;
@@ -120,7 +121,7 @@ function ensureReopenHandle(app) {
   h.addEventListener('pointerdown', (e) => {
     if (e.button > 0) return;
     e.preventDefault();
-    setCollapsed(false);
+    setMode(prevMode && prevMode !== 1 ? prevMode : 3);
     widths.list = LIMIT.list[0]; // 최소 너비로 한 번에 열기
     applyLayout();
     startResize(e, 'list', null, LIMIT.list[0]); // 이어서 끌면 그대로 너비 조절
@@ -147,14 +148,16 @@ function startResize(e, kind, h, w0Override) {
   h?.classList.add('on');
   let raf = 0;
   let collapsing = false;
+  const cols0 = app.dataset.cols;
+  const canCollapse = kind === 'list' && hasNote(); // 열린 노트가 없으면 접지 않음
   const move = (ev) => {
     const raw = w0 + ev.clientX - x0;
-    if (kind === 'list') {
-      // 최소 너비보다 더 밀면 목록 접기 (다시 당기면 최소 너비로 복귀)
+    if (canCollapse) {
+      // 최소 너비보다 더 밀면 '노트만'으로 미리 보여 주기 (다시 당기면 원래대로)
       const c = raw < lo - COLLAPSE_PAST;
       if (c !== collapsing) {
         collapsing = c;
-        app.classList.toggle('list-collapsed', c);
+        app.dataset.cols = c ? '1' : cols0;
       }
       if (c) return;
     }
@@ -170,9 +173,9 @@ function startResize(e, kind, h, w0Override) {
     window.removeEventListener('pointercancel', up);
     document.body.classList.remove('resizing-cols');
     h?.classList.remove('on');
-    if (kind === 'list') {
-      setCollapsed(collapsing);
-      if (collapsing) widths.list = Math.max(lo, w0); // 다음에 열 때를 위해 너비는 정상 범위로
+    if (collapsing) {
+      setMode(1); // '노트만' (◧ 아이콘도 같은 상태)
+      widths.list = Math.max(lo, w0); // 다음에 열 때를 위해 너비는 정상 범위로
     }
     saveWidths();
     applyLayout();

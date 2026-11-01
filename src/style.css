@@ -628,15 +628,17 @@ body.resizing-sheet { cursor: ew-resize; user-select: none; }
 .created-form .preview { font-size: 13px; color: var(--soft); }
 
 /* 목록 접기 (경계선을 최소 너비보다 더 밀었을 때) */
-.app.list-collapsed[data-cols='3'] { grid-template-columns: var(--w-folders, 264px) 1fr; }
-.app.list-collapsed[data-cols='2'] { grid-template-columns: 1fr; }
-.app.list-collapsed .pane-list { display: none; }
 .pane-editor { position: relative; }
 .list-reopen { display: none; position: absolute; left: 0; top: 50%; transform: translateY(-50%); z-index: 8; width: 16px; height: 84px; padding: 0; border-radius: 0 10px 10px 0; background: var(--line); color: var(--soft); cursor: col-resize; touch-action: none; box-shadow: 1px 0 6px rgba(0,0,0,.12); }
 .list-reopen span { font-size: 15px; font-weight: 700; line-height: 1; }
 .list-reopen:hover { background: var(--accent); color: #fff; width: 20px; }
-.app.list-collapsed .list-reopen { display: grid; place-items: center; }
+.app[data-cols='1'] .list-reopen { display: grid; place-items: center; } /* '노트만' 상태에서는 늘 표시 */
 @media print { .list-reopen { display: none !important; } }
 
 /* iPad 창 단추·상단 흐림 막 아래로 메뉴 내리기: 여백 부분은 머리줄과 같은 바탕색 */
 .app { background: var(--pane); }
+
+/* iPad 홈 화면 앱: 맨 윗줄은 시스템 상태 표시줄(창 단추 포함)과 공유 → 그 높이만큼 내리고, 창 단추 자리만큼 왼쪽을 비움 */
+body.ipad-app .app[data-cols='3'] .pane-folders > .pane-head,
+body.ipad-app .app[data-cols='2'] .pane-list > .pane-head,
+body.ipad-app .app[data-cols='1'] .pane-editor > .pane-head { padding-left: var(--ctl-gap, 0px); }
