@@ -9,7 +9,7 @@ import { newDrawingAttrs, flushAllDrawings, getDrawingView, resetZoom } from './
 import { makeSortable } from './sortable.js';
 import { DEVICE_ID } from './device.js';
 
-const VERSION = 'v0.7.3 · 7단계';
+const VERSION = 'v0.7.4 · 7단계';
 const $ = (sel) => document.querySelector(sel);
 const app = $('#app');
 
@@ -1091,7 +1091,7 @@ const isIPad = () => /iPad/i.test(navigator.userAgent) || (navigator.platform ==
 function getTopGap() { try { return localStorage.getItem(TOPGAP_KEY) || 'auto'; } catch { return 'auto'; } }
 function applyTopGap() {
   const v = getTopGap();
-  const px = v === 'auto' ? (isIPad() && isStandalone ? 40 : 0) : Number(v) || 0;
+  const px = v === 'auto' ? 0 : Number(v) || 0; // 자동 = 시스템 안전 영역만 따름 (iPad 창 단추 위치가 기기·창마다 달라 고정값을 두지 않음)
   document.documentElement.style.setProperty('--top-gap', `${px}px`);
 }
 $('#sel-topgap').addEventListener('change', (e) => {
