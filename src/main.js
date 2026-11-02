@@ -11,7 +11,7 @@ import { DEVICE_ID } from './device.js';
 import QRCode from 'qrcode';
 import { newShareId, isWebUrl, hostLabel, normCode, CODE_RE } from './share-utils.js';
 
-const VERSION = 'v0.8.4 · 8단계';
+const VERSION = 'v0.8.5 · 8단계';
 const $ = (sel) => document.querySelector(sel);
 const app = $('#app');
 

@@ -681,7 +681,10 @@ a.att-host:hover { text-decoration: underline; color: var(--accent); }
 .qr-big .qb-url { margin: 0; font: 600 clamp(22px, 5.2vw, 72px)/1.25 Pretendard, 'Noto Sans KR', sans-serif; letter-spacing: -.01em; word-break: break-all; color: #333; }
 .qr-big .qb-url b { color: #243e6b; font-weight: 800; }
 .qr-big small { color: #888; }
-#btn-share.on { color: #1f8a4c; }
+/* 지구본: 게시 중이면 원래 색(파랑), 게시하지 않은 노트는 회색 */
+#btn-share:not(.on) { filter: grayscale(1); opacity: .5; }
+#btn-share:not(.on):not(:disabled):hover { opacity: .8; }
+#btn-share.on { filter: none; opacity: 1; }
 
 /* 열람 화면 (view.html) */
 body.viewer { height: 100dvh; display: flex; flex-direction: column; margin: 0; }
