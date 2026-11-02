@@ -423,7 +423,8 @@ body.is-dragging, body.is-dragging * { cursor: grabbing !important; }
 
 /* 휴대폰: 편집 머리줄을 두 줄로 (1줄: 뒤로·별표·제목 / 2줄: 태그·배경·폴더·잠금·인쇄·삭제) */
 @media (max-width: 680px) {
-  .pane-editor > .pane-head { flex-wrap: wrap; row-gap: 2px; padding-bottom: 6px; }
+  .pane-editor > .pane-head { padding-bottom: 6px; }
+  .pane-editor .head-in { flex-wrap: wrap; row-gap: 2px; }
   .pane-editor > .pane-head .title-input { flex: 1 0 calc(100% - 84px); }
   .pane-editor > .pane-head .sel-move { flex: 1 1 0; max-width: none; min-width: 0; }
 }
@@ -727,3 +728,21 @@ body.viewer :is(.img-menu, .img-h, .ink-bar, .ink-hint) { display: none !importa
 .nc-globe { display: inline-block; filter: grayscale(1); opacity: .55; }
 .nc-globe.on { filter: none; opacity: 1; }
 .ctx-menu button:disabled { opacity: .45; cursor: default; }
+
+/* 노트 영역이 좁을 때(세로로 든 태블릿의 2열 등): 머리줄 단추를 ⋯ 메뉴로 접기 (v0.8.7)
+   창 너비가 아니라 노트 영역 너비로 판단 — 가로 모드처럼 넓으면 그대로 */
+.pane-editor > .pane-head { container-type: inline-size; container-name: notehead; }
+@container notehead (max-width: 820px) {
+  .desk-act { display: none !important; }
+  #btn-more { display: inline-block; }
+  .save-state { max-width: 64px; overflow: hidden; text-overflow: ellipsis; }
+}
+/* 머리줄 내용 묶음 (좁을 때 두 줄로 접기 위해) */
+.pane-editor .head-in { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; }
+/* 더 좁으면 휴대폰처럼 두 줄: 1줄 보기·별표·제목 / 2줄 배경·폴더·⋯ */
+@container notehead (max-width: 560px) {
+  .save-state { display: none; }
+  .head-in { flex-wrap: wrap; row-gap: 2px; }
+  .title-input { flex: 1 0 calc(100% - 84px); }
+  .sel-move { flex: 1 1 0; max-width: none; min-width: 0; }
+}
