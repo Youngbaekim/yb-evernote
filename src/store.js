@@ -447,3 +447,51 @@ export async function publicInfo(sid) {
     return { error: err };
   }
 }
+
+/* ───────── 노트 복제: 그림·필기도 새 ID로 복사 ─────────
+   원본을 영구 삭제해도 사본이 깨지지 않도록 그림·필기 묶음을 모두 따로 둠.
+   content 안의 imageId·drawingId를 새 ID로 바꾼 본문을 돌려줌 */
+export async function cloneNoteMedia(dstNoteId, content) {
+  if (!content) return content;
+  const json = JSON.parse(JSON.stringify(content));
+  const imgMap = new Map();
+  const drwMap = new Map();
+  const walk = (node) => {
+    if (!node || typeof node !== 'object') return;
+    const a = node.attrs;
+    if (a?.imageId) {
+      if (!imgMap.has(a.imageId)) imgMap.set(a.imageId, newId('img'));
+      a.imageId = imgMap.get(a.imageId);
+    }
+    if (node.type === 'drawing' && a?.drawingId) {
+      if (!drwMap.has(a.drawingId)) drwMap.set(a.drawingId, newId('drw'));
+      a.drawingId = drwMap.get(a.drawingId);
+    }
+    (node.content || []).forEach(walk);
+  };
+  walk(json);
+  // 그림
+  for (const [oldId, nid] of imgMap) {
+    try {
+      let d;
+      try { d = await getDocFromCache(ref('images', oldId)); } catch { d = null; }
+      if (!d?.exists()) d = await getDoc(ref('images', oldId));
+      if (d.exists()) setDoc(ref('images', nid), { ...d.data(), noteId: dstNoteId, createdAt: Date.now() }).catch(report('그림 복제')); // 쓰기는 기다리지 않음 (오프라인에서도 바로 진행)
+    } catch (err) { report('그림 복제')(err); }
+  }
+  // 필기 묶음
+  for (const [oldId, nid] of drwMap) {
+    try {
+      const snap = await getDocs(query(col('chunks'), where('drawingId', '==', oldId)));
+      for (let i = 0; i < snap.docs.length; i += 400) {
+        const b = writeBatch(fs);
+        snap.docs.slice(i, i + 400).forEach((d) => {
+          const cid = d.id.startsWith(oldId) ? nid + d.id.slice(oldId.length) : `${nid}_${d.id}`;
+          b.set(ref('chunks', cid), { ...d.data(), drawingId: nid, noteId: dstNoteId });
+        });
+        b.commit().catch(report('필기 복제'));
+      }
+    } catch (err) { report('필기 복제')(err); }
+  }
+  return json;
+}

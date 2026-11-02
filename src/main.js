@@ -11,7 +11,7 @@ import { DEVICE_ID } from './device.js';
 import QRCode from 'qrcode';
 import { newShareId, isWebUrl, hostLabel, normCode, CODE_RE } from './share-utils.js';
 
-const VERSION = 'v0.8.3 · 8단계';
+const VERSION = 'v0.8.4 · 8단계';
 const $ = (sel) => document.querySelector(sel);
 const app = $('#app');
 
@@ -658,6 +658,7 @@ function renderEditorHeader({ keepTitle = false } = {}) {
   $('#btn-lock').textContent = note?.locked ? '🔒' : '🔓';
   $('#btn-lock').title = note?.locked ? '잠긴 노트 (눌러서 잠금 해제)' : '이 노트 잠그기';
   $('#btn-lock').classList.toggle('on', !!note?.locked);
+  $('#btn-copy').disabled = !has || trashed;
   $('#btn-share').disabled = !has || trashed || !!note?.locked;
   $('#btn-share').classList.toggle('on', !!note?.shareId);
   $('#btn-share').title = note?.shareId ? '웹에 게시 중 (주소·QR·자료 링크)' : note?.locked ? '잠긴 노트는 웹에 게시할 수 없습니다' : '웹에 게시 (실시간 공유)';
@@ -866,15 +867,17 @@ function folderMenu(id, anchor) {
   menu.innerHTML = `
     <button data-fm="add">＋ 하위 폴더 추가</button>
     <button data-fm="rename">이름 변경</button>
+    <button data-fm="copy">⧉ 폴더 복제 (하위 폴더·노트 포함)</button>
     <button data-fm="delete" class="danger">폴더 삭제</button>`;
   menu.hidden = false;
   menu.style.left = `${Math.min(r.left, window.innerWidth - 190)}px`;
-  menu.style.top = `${Math.min(r.bottom + 4, window.innerHeight - 140)}px`;
+  menu.style.top = `${Math.min(r.bottom + 4, window.innerHeight - 180)}px`;
   menu.onclick = (e) => {
     const act = e.target.closest('[data-fm]')?.dataset.fm;
     menu.hidden = true;
     if (act === 'add') addFolder(id);
     if (act === 'rename') renameFolder(f);
+    if (act === 'copy') duplicateFolder(f);
     if (act === 'delete') removeFolder(f);
   };
 }
@@ -882,7 +885,7 @@ function folderMenu(id, anchor) {
 /** 휴대폰: 잠금·이전 버전·인쇄·삭제를 ⋯ 메뉴로 (PC·태블릿은 머리줄 단추 그대로) */
 function noteMenu(anchor) {
   const menu = $('#ctx-menu');
-  const items = ['#btn-share', '#btn-lock', '#btn-history', '#btn-print', '#btn-delete']
+  const items = ['#btn-copy', '#btn-share', '#btn-lock', '#btn-history', '#btn-print', '#btn-delete']
     .map((id) => $(id))
     .filter((b) => !b.disabled)
     .map((b) => `<button data-nm="${b.id}" class="${b.id === 'btn-delete' ? 'danger' : ''}">${b.textContent} ${esc(b.title)}</button>`);
@@ -1206,6 +1209,7 @@ $('#btn-delete').addEventListener('click', deleteNote);
 $('#btn-more').addEventListener('click', (e) => { const m = $('#ctx-menu'); if (!m.hidden && m.querySelector('[data-nm]')) { m.hidden = true; return; } noteMenu(e.currentTarget); });
 $('#btn-lock').addEventListener('click', toggleLock);
 $('#btn-share').addEventListener('click', openShare);
+$('#btn-copy').addEventListener('click', () => duplicateNote());
 $('#btn-print').addEventListener('click', printNote);
 $('#btn-history').addEventListener('click', openHistory);
 $('#btn-layout').addEventListener('click', cycleLayout);
@@ -1286,6 +1290,134 @@ document.addEventListener('visibilitychange', () => {
 });
 setInterval(() => { if (unlockedUntil && !isUnlocked()) { unlockedUntil = 0; relock(); } }, 30 * 1000);
 window.addEventListener('pagehide', flushSave);
+
+/* ───────── 복제: 노트 · 폴더(하위 폴더·노트 포함) ─────────
+   - 그림·필기는 새 ID로 따로 복사 (원본을 지워도 사본은 그대로)
+   - 게시 상태(주소)는 복사하지 않음. 자료 링크·머리말·게시 토글은 그대로 가져가 바로 다시 게시할 수 있음
+   - 잠긴 노트는 잠긴 채로 복제 */
+function withSuffix(title, suffix) {
+  if (!suffix) return title || '';
+  const t = title || '';
+  const m = t.match(/\s#[\p{L}\p{N}_-]+/u); // 태그 앞에 '(사본)'
+  return m ? `${t.slice(0, m.index)}${suffix}${t.slice(m.index)}` : `${t}${suffix}`;
+}
+/** 직접 정렬에서 원본 바로 아래 자리 */
+function orderAfter(src) {
+  const o = noteOrder(src);
+  const next = state.notes.filter((x) => !x.trashedAt && (x.folderId ?? null) === (src.folderId ?? null) && noteOrder(x) > o).map(noteOrder);
+  return next.length ? (o + Math.min(...next)) / 2 : o + 1000;
+}
+async function cloneNote(src, { folderId = src.folderId ?? null, suffix = ' (사본)', order } = {}) {
+  const now = Date.now();
+  const id = store.newId('note');
+  const content = await store.cloneNoteMedia(id, src.content);
+  const { shareId, lastShareId, verAt, updatedBy, ...rest } = src;
+  const note = {
+    ...rest,
+    id,
+    title: withSuffix(src.title, suffix),
+    content,
+    folderId,
+    fav: false,
+    trashedAt: null,
+    order: order ?? orderAfter(src),
+    attachments: (src.attachments || []).map((a) => ({ ...a })),
+    createdAt: now,
+    updatedAt: now,
+  };
+  note.tags = tagsOf(note.title);
+  store.saveNote(note);
+  state.notes.push(note);
+  return note;
+}
+
+async function duplicateNote(id = state.noteId) {
+  const src = state.notes.find((n) => n.id === id);
+  if (!src || src.trashedAt) return;
+  if (id === state.noteId) { await flushAllDrawings(); await flushSave(); }
+  setSaveState('복제 중…');
+  const copy = await cloneNote(src);
+  renderList();
+  await openNote(copy.id);
+  setSaveState('복제됨');
+  const t = $('#note-title');
+  t.focus();
+  t.select();
+}
+
+async function duplicateFolder(f) {
+  // 하위 폴더 전체 (트리 순서)
+  const tree = [{ folder: f, depth: 0 }, ...folderTree(f.id, 1)];
+  const ids = new Set(tree.map((x) => x.folder.id));
+  const notes = state.notes.filter((n) => !n.trashedAt && ids.has(n.folderId));
+  const subN = tree.length - 1;
+  if (!confirm(`‘${f.name}’ 폴더를 복제할까요?\n하위 폴더 ${subN}개, 노트 ${notes.length}개가 그림·필기·자료 링크까지 함께 복사됩니다.\n(웹 게시 상태는 복사하지 않습니다)`)) return;
+  await flushAllDrawings();
+  await flushSave();
+  const now = Date.now();
+  const map = new Map(); // 원본 폴더 ID → 사본 폴더 ID
+  const siblings = childrenOf(f.parentId ?? null);
+  for (const { folder: src } of tree) {
+    const top = src.id === f.id;
+    const nf = {
+      ...src,
+      id: store.newId('fld'),
+      name: top ? `${src.name} (사본)` : src.name,
+      parentId: top ? src.parentId ?? null : map.get(src.parentId),
+      order: top ? (src.order ?? 0) + 0.5 : src.order,
+      createdAt: now,
+      updatedAt: now,
+    };
+    if (top) { // 원본 바로 아래로
+      const i = siblings.findIndex((x) => x.id === src.id);
+      nf.order = between(src.order ?? 0, siblings[i + 1]?.order ?? null);
+    }
+    map.set(src.id, nf.id);
+    store.saveFolder(nf);
+    state.folders.push(nf);
+  }
+  state.folders.sort((a, b) => (a.order ?? 0) - (b.order ?? 0) || a.createdAt - b.createdAt);
+  let k = 0;
+  for (const n of notes) {
+    setSaveState(`복제 중… ${++k}/${notes.length}`);
+    await cloneNote(n, { folderId: map.get(n.folderId), suffix: '', order: noteOrder(n) });
+  }
+  setSaveState(notes.length ? `노트 ${notes.length}개 복제됨` : '복제됨');
+  state.filter = map.get(f.id);
+  collapsed.delete(f.parentId);
+  renderList();
+  renderEditorHeader({ keepTitle: true });
+}
+
+/** 노트 카드 오른쪽 클릭 메뉴 */
+function noteCardMenu(id, x, y) {
+  const n = state.notes.find((v) => v.id === id);
+  if (!n || n.trashedAt) return;
+  const menu = $('#ctx-menu');
+  menu.innerHTML = `<button data-nc="copy">⧉ 노트 복제</button>`;
+  menu.hidden = false;
+  menu.style.left = `${Math.min(x, window.innerWidth - 200)}px`;
+  menu.style.top = `${Math.min(y, window.innerHeight - 60)}px`;
+  menu.onclick = (e) => {
+    const act = e.target.closest('[data-nc]')?.dataset.nc;
+    menu.hidden = true;
+    if (act === 'copy') duplicateNote(id);
+  };
+}
+$('#note-list').addEventListener('contextmenu', (e) => {
+  const card = e.target.closest('[data-note]');
+  const sub = e.target.closest('.sub-folder[data-folder]');
+  if (!card && !sub) return;
+  e.preventDefault();
+  if (card) noteCardMenu(card.dataset.note, e.clientX, e.clientY);
+  else folderMenu(sub.dataset.folder, sub);
+});
+$('#folder-nav').addEventListener('contextmenu', (e) => {
+  const row = e.target.closest('.folder-row[data-fid]');
+  if (!row) return;
+  e.preventDefault();
+  folderMenu(row.dataset.fid, row.querySelector('.f-more') || row);
+});
 
 /* ───────── 웹에 게시 (실시간 공유) ─────────
    - 노트의 공개 사본을 public/{공유ID}에 두고, 로그인 없이 view.html?s=공유ID 로 읽기 전용 열람
