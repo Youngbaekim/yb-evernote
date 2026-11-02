@@ -394,7 +394,7 @@ export function publishNote(sid, n) {
     background: n.background || 'lined',
     bgColor: n.bgColor || '',
     createdAt: n.createdAt || null,
-    attachments: n.attachments || [],
+    attachments: (n.attachments || []).filter((a) => !a.hidden).map(({ name, url }) => ({ name, url })), // '게시'를 끈 자료는 공개 사본에 넣지 않음
     shareName: n.shareName || '',
     publishedAt: Date.now(),
   })).catch(report('웹 게시'));

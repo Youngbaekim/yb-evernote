@@ -11,7 +11,7 @@ import { DEVICE_ID } from './device.js';
 import QRCode from 'qrcode';
 import { newShareId, isWebUrl, hostLabel, normCode, CODE_RE } from './share-utils.js';
 
-const VERSION = 'v0.8.2 · 8단계';
+const VERSION = 'v0.8.3 · 8단계';
 const $ = (sel) => document.querySelector(sel);
 const app = $('#app');
 
@@ -1328,7 +1328,8 @@ async function stopShare(n, refresh = true) {
   pubTimers.delete(n.id);
   pendingPub.delete(n.id);
   n.shareId = null;
-  store.updateFields('notes', n.id, { shareId: null });
+  n.lastShareId = sid; // 다시 게시할 때 같은 주소로
+  store.updateFields('notes', n.id, { shareId: null, lastShareId: sid });
   await store.unpublish(sid);
   if (refresh) renderEditorHeader({ keepTitle: true });
 }
@@ -1382,79 +1383,23 @@ async function openShare() {
   const dlg = $('#share-dlg');
   const body = dlg.querySelector('.share-body');
   const fresh = () => (n = state.notes.find((x) => x.id === n.id) || n); // 동기화로 바뀐 최신 노트 객체
-  const draw = async () => {
+  // 게시 정보 저장 (게시 중이면 열람 화면에 바로 반영, 중지 상태면 저장만)
+  const saveMeta = (fields) => {
     fresh();
-    if (!n.shareId) {
-      body.innerHTML = `
-        <p class="hint" style="margin-top:0">이 노트를 로그인 없이 볼 수 있는 웹 주소로 게시합니다. 고치는 내용이 열람 화면에 자동으로 반영되며, 열람자는 고칠 수 없습니다.</p>
-        <ul class="share-notes">
-          <li>주소를 아는 사람은 누구나 볼 수 있습니다. 개인정보가 없는지 확인해 주세요.</li>
-          <li>자료 파일은 OneDrive에 올린 뒤 ‘링크가 있는 모든 사용자’ 공유 링크를 첨부합니다.</li>
-        </ul>
-        <label class="share-field">열람 화면 머리말 <input id="share-name" maxlength="40" value="${esc(n.shareName || 'YB 노트')}" /></label>
-        <label class="share-field share-code">주소 코드 <span class="code-pre">…/class/</span><input id="share-code" maxlength="20" autocapitalize="off" autocomplete="off" spellcheck="false" placeholder="예: kcce (비우면 무작위)" value="${esc(lastCode())}" /></label>
-        <p class="hint">특강처럼 주소를 불러 주거나 화면에 띄울 때는 짧은 코드를 정하세요. 코드를 아는 사람은 누구나 볼 수 있으니 공개해도 되는 내용에만 씁니다.</p>
-        <div class="row-btns" style="justify-content:flex-end;margin-top:14px">
-          <button class="btn-ghost" value="close">닫기</button>
-          <button type="button" class="btn-primary" id="share-start">🌐 웹에 게시</button>
-        </div>`;
-      body.querySelector('#share-start').onclick = async (e) => {
-        const btn = e.currentTarget;
-        btn.disabled = true;
-        btn.textContent = '확인 중…';
-        const sid = await resolveCode(body.querySelector('#share-code').value.trim(), fresh());
-        if (!sid) { btn.disabled = false; btn.textContent = '🌐 웹에 게시'; return; }
-        btn.textContent = '게시 중…';
-        await startShare(fresh(), body.querySelector('#share-name').value.trim(), sid);
-        draw();
-      };
-      return;
-    }
-    const url = viewUrl(n.shareId);
-    const qr = await QRCode.toDataURL(url, { margin: 1, width: 360, errorCorrectionLevel: 'M' });
+    Object.assign(n, fields);
+    store.updateFields('notes', n.id, fields);
+    if (n.shareId) publishNow(n);
+  };
+  // 자료 링크 목록 — 게시 중이든 중지 상태든 같은 모양으로 보이고 고칠 수 있음
+  const attSection = () => {
     const atts = n.attachments || [];
-    body.innerHTML = `
-      <div class="share-live">● 게시 중 <span id="share-status" class="share-status"></span></div>
-      <div class="share-url"><input id="share-url" readonly value="${esc(url.replace(/^https:\/\//, ''))}" /><button type="button" class="btn-ghost" id="share-copy">복사</button><a class="btn-ghost" href="${esc(url)}" target="_blank" rel="noopener">열기</a></div>
-      <div class="share-qr"><img id="share-qr" src="${qr}" alt="열람 주소 QR 코드" width="132" height="132" />
-        <div class="share-opts">
-          <label class="share-field">반영 간격 <select id="share-iv">${SHARE_INTERVALS.map(([v, l]) => `<option value="${v}" ${v === (n.shareInterval ?? 5) ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
-          <label class="share-field">머리말 <input id="share-name" maxlength="40" value="${esc(n.shareName || 'YB 노트')}" /></label>
-          <div class="row-btns"><button type="button" class="btn-ghost" id="share-now">지금 반영</button><button type="button" class="btn-ghost" id="share-big">발표 화면</button></div>
-        </div>
-      </div>
-      <h4 class="share-h">자료 링크 <small>OneDrive 공유 링크 → 열람 화면의 ‘내려받기’ 단추</small></h4>
-      <ul class="att-list">${atts.length ? atts.map((a, i) => `<li class="att-item" data-i="${i}"><span class="att-grip" title="끌어서 순서 바꾸기" aria-hidden="true">⋮⋮</span><input class="att-name" data-att-name="${i}" value="${esc(a.name)}" maxlength="80" title="눌러서 이름 고치기 (Enter로 저장)" aria-label="자료 이름" /><a class="att-host" href="${esc(a.url)}" target="_blank" rel="noopener" data-nodrag title="링크 열어 보기">${esc(hostLabel(a.url))}</a><button type="button" class="btn-text danger" data-nodrag data-att-del="${i}">삭제</button></li>`).join('') : '<li class="att-empty">첨부한 자료가 없습니다.</li>'}</ul>
-      ${atts.length > 1 ? '<p class="hint att-tip">이름은 눌러서 바로 고치고, 줄을 끌어 순서를 바꿉니다. (휴대폰은 길게 누른 뒤 끌기)</p>' : atts.length ? '<p class="hint att-tip">이름은 눌러서 바로 고칠 수 있습니다.</p>' : ''}
+    return `<h4 class="share-h">자료 링크 <small>OneDrive 공유 링크 → 열람 화면의 ‘내려받기’ 단추</small></h4>
+      <ul class="att-list">${atts.length ? atts.map((a, i) => `<li class="att-item${a.hidden ? ' off' : ''}" data-i="${i}"><span class="att-grip" title="끌어서 순서 바꾸기" aria-hidden="true">⋮⋮</span><input class="att-name" data-att-name="${i}" value="${esc(a.name)}" maxlength="80" title="눌러서 이름 고치기 (Enter로 저장)" aria-label="자료 이름" /><a class="att-host" href="${esc(a.url)}" target="_blank" rel="noopener" data-nodrag title="링크 열어 보기">${esc(hostLabel(a.url))}</a><button type="button" class="att-pub${a.hidden ? '' : ' on'}" data-nodrag data-att-pub="${i}" aria-pressed="${!a.hidden}" title="${a.hidden ? '열람 화면에 숨김 · 누르면 다시 보이기' : '열람 화면에 보임 · 누르면 숨기기'}">게시</button><button type="button" class="btn-text danger" data-nodrag data-att-del="${i}">삭제</button></li>`).join('') : '<li class="att-empty">첨부한 자료가 없습니다.</li>'}</ul>
+      ${atts.length > 1 ? '<p class="hint att-tip">이름은 눌러서 바로 고치고, 줄을 끌어 순서를 바꿉니다(휴대폰은 길게 누른 뒤 끌기). ‘게시’를 끄면 열람 화면에서만 숨겨집니다.</p>' : atts.length ? '<p class="hint att-tip">이름은 눌러서 바로 고칠 수 있습니다. ‘게시’를 끄면 열람 화면에서만 숨겨집니다.</p>' : ''}
       <div class="att-add"><input id="att-name" placeholder="표시 이름 (예: 3주차 강의자료.pdf)" maxlength="80" /><input id="att-url" placeholder="공유 링크 (https://…)" inputmode="url" /><button type="button" class="btn-primary" id="att-add">추가</button></div>
-      <p id="att-msg" class="hint"></p>
-      <div class="row-btns" style="justify-content:space-between;margin-top:14px">
-        <button type="button" class="btn-ghost danger-ghost" id="share-stop">게시 중지</button>
-        <button class="btn-ghost" value="close">닫기</button>
-      </div>`;
-    renderShareStatus();
-    const saveMeta = (fields) => {
-      fresh();
-      Object.assign(n, fields);
-      store.updateFields('notes', n.id, fields);
-      publishNow(n);
-    };
-    body.querySelector('#share-copy').onclick = async (e) => {
-      try { await navigator.clipboard.writeText(url); } catch { body.querySelector('#share-url').select(); document.execCommand('copy'); }
-      e.currentTarget.textContent = '복사됨';
-    };
-    body.querySelector('#share-iv').onchange = (e) => {
-      const v = Number(e.target.value);
-      saveMeta({ shareInterval: v });
-    };
-    body.querySelector('#share-name').onchange = (e) => saveMeta({ shareName: e.target.value.trim() || 'YB 노트' });
-    body.querySelector('#share-now').onclick = async () => { await flushSave(); publishNow(fresh()); };
-    body.querySelector('#share-big').onclick = () => showBigQR(qr, url, n.shareName);
-    body.querySelector('#share-stop').onclick = async () => {
-      if (!confirm('게시를 중지할까요?\n열람 중인 화면에는 ‘게시가 종료되었습니다’가 표시되고, 이 주소는 다시 쓸 수 없습니다.')) return;
-      await stopShare(fresh());
-      draw();
-    };
+      <p id="att-msg" class="hint"></p>`;
+  };
+  const bindAtt = () => {
     body.querySelectorAll('[data-att-name]').forEach((inp) => {
       const commit = () => {
         const i = Number(inp.dataset.attName);
@@ -1476,6 +1421,14 @@ async function openShare() {
     });
     attDraw = draw;
     ensureAttSortable(body);
+    body.querySelectorAll('[data-att-pub]').forEach((b) => (b.onclick = () => {
+      const i = Number(b.dataset.attPub);
+      const list = [...(fresh().attachments || [])];
+      if (!list[i]) return;
+      list[i] = { ...list[i], hidden: !list[i].hidden };
+      saveMeta({ attachments: list });
+      draw();
+    }));
     body.querySelectorAll('[data-att-del]').forEach((b) => (b.onclick = () => {
       const list = [...(fresh().attachments || [])];
       list.splice(Number(b.dataset.attDel), 1);
@@ -1492,6 +1445,73 @@ async function openShare() {
     };
     body.querySelector('#att-add').onclick = add;
     body.querySelector('#att-url').onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); add(); } };
+  };
+  const draw = async () => {
+    fresh();
+    if (!n.shareId) {
+      body.innerHTML = `
+        ${n.lastShareId ? `<div class="share-paused">⏸ 게시 중지됨 · 자료 링크를 점검한 뒤 같은 주소로 다시 게시할 수 있습니다.</div>` : ''}
+        <p class="hint" style="margin-top:0">이 노트를 로그인 없이 볼 수 있는 웹 주소로 게시합니다. 고치는 내용이 열람 화면에 자동으로 반영되며, 열람자는 고칠 수 없습니다.</p>
+        <ul class="share-notes">
+          <li>주소를 아는 사람은 누구나 볼 수 있습니다. 개인정보가 없는지 확인해 주세요.</li>
+          <li>자료 파일은 OneDrive에 올린 뒤 ‘링크가 있는 모든 사용자’ 공유 링크를 첨부합니다.</li>
+        </ul>
+        <label class="share-field">열람 화면 머리말 <input id="share-name" maxlength="40" value="${esc(n.shareName || 'YB 노트')}" /></label>
+        <label class="share-field share-code">주소 코드 <span class="code-pre">…/class/</span><input id="share-code" maxlength="20" autocapitalize="off" autocomplete="off" spellcheck="false" placeholder="예: kcce (비우면 무작위)" value="${esc(n.lastShareId || lastCode())}" /></label>
+        <p class="hint">특강처럼 주소를 불러 주거나 화면에 띄울 때는 짧은 코드를 정하세요. 코드를 아는 사람은 누구나 볼 수 있으니 공개해도 되는 내용에만 씁니다.</p>
+        ${attSection()}
+        <div class="row-btns" style="justify-content:flex-end;margin-top:14px">
+          <button class="btn-ghost" value="close">닫기</button>
+          <button type="button" class="btn-primary" id="share-start">🌐 웹에 게시</button>
+        </div>`;
+      body.querySelector('#share-start').onclick = async (e) => {
+        const btn = e.currentTarget;
+        btn.disabled = true;
+        btn.textContent = '확인 중…';
+        const sid = await resolveCode(body.querySelector('#share-code').value.trim(), fresh());
+        if (!sid) { btn.disabled = false; btn.textContent = '🌐 웹에 게시'; return; }
+        btn.textContent = '게시 중…';
+        await startShare(fresh(), body.querySelector('#share-name').value.trim(), sid);
+        draw();
+      };
+      bindAtt();
+      return;
+    }
+    const url = viewUrl(n.shareId);
+    const qr = await QRCode.toDataURL(url, { margin: 1, width: 360, errorCorrectionLevel: 'M' });
+    body.innerHTML = `
+      <div class="share-live">● 게시 중 <span id="share-status" class="share-status"></span></div>
+      <div class="share-url"><input id="share-url" readonly value="${esc(url.replace(/^https:\/\//, ''))}" /><button type="button" class="btn-ghost" id="share-copy">복사</button><a class="btn-ghost" href="${esc(url)}" target="_blank" rel="noopener">열기</a></div>
+      <div class="share-qr"><img id="share-qr" src="${qr}" alt="열람 주소 QR 코드" width="132" height="132" />
+        <div class="share-opts">
+          <label class="share-field">반영 간격 <select id="share-iv">${SHARE_INTERVALS.map(([v, l]) => `<option value="${v}" ${v === (n.shareInterval ?? 5) ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+          <label class="share-field">머리말 <input id="share-name" maxlength="40" value="${esc(n.shareName || 'YB 노트')}" /></label>
+          <div class="row-btns"><button type="button" class="btn-ghost" id="share-now">지금 반영</button><button type="button" class="btn-ghost" id="share-big">발표 화면</button></div>
+        </div>
+      </div>
+      ${attSection()}
+      <div class="row-btns" style="justify-content:space-between;margin-top:14px">
+        <button type="button" class="btn-ghost danger-ghost" id="share-stop">게시 중지</button>
+        <button class="btn-ghost" value="close">닫기</button>
+      </div>`;
+    renderShareStatus();
+    body.querySelector('#share-copy').onclick = async (e) => {
+      try { await navigator.clipboard.writeText(url); } catch { body.querySelector('#share-url').select(); document.execCommand('copy'); }
+      e.currentTarget.textContent = '복사됨';
+    };
+    body.querySelector('#share-iv').onchange = (e) => {
+      const v = Number(e.target.value);
+      saveMeta({ shareInterval: v });
+    };
+    body.querySelector('#share-name').onchange = (e) => saveMeta({ shareName: e.target.value.trim() || 'YB 노트' });
+    body.querySelector('#share-now').onclick = async () => { await flushSave(); publishNow(fresh()); };
+    body.querySelector('#share-big').onclick = () => showBigQR(qr, url, n.shareName);
+    body.querySelector('#share-stop').onclick = async () => {
+      if (!confirm('게시를 중지할까요?\n열람 중인 화면에는 ‘게시가 종료되었습니다’가 표시됩니다.\n자료 링크·머리말·코드는 그대로 남아 있어, 점검 후 같은 주소로 다시 게시할 수 있습니다.')) return;
+      await stopShare(fresh());
+      draw();
+    };
+    bindAtt();
   };
   await draw();
   if (!dlg.open) dlg.showModal();
@@ -1511,7 +1531,7 @@ function ensureAttSortable(root) {
     places: () => ['before', 'after'],
     onDrop: (src, t, place) => {
       const n = current();
-      if (!n?.shareId) return;
+      if (!n) return;
       const list = [...(n.attachments || [])];
       const from = Number(src.dataset.i);
       let to = Number(t.dataset.i) + (place === 'after' ? 1 : 0);
@@ -1520,7 +1540,7 @@ function ensureAttSortable(root) {
       list.splice(to, 0, moved);
       n.attachments = list;
       store.updateFields('notes', n.id, { attachments: list });
-      publishNow(n);
+      if (n.shareId) publishNow(n);
       attDraw?.();
     },
   });
