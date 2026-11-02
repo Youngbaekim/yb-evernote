@@ -658,6 +658,18 @@ body.resizing-sheet { cursor: ew-resize; user-select: none; }
 .att-list li { display: flex; align-items: center; gap: 8px; padding: 7px 10px; font-size: 13.5px; }
 .att-list li + li { border-top: 1px solid var(--line); }
 .att-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+input.att-name { padding: 4px 6px; margin: -4px 0; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--ink); font: inherit; cursor: text; transition: border-color .15s, background .3s; }
+input.att-name:hover { border-color: var(--line); }
+input.att-name:focus { border-color: var(--accent); background: var(--paper); outline: none; }
+input.att-name.saved { background: rgba(31,138,76,.15); }
+.att-item { cursor: grab; touch-action: pan-y; user-select: none; }
+.att-grip { flex: none; color: var(--soft); font-size: 12px; letter-spacing: -2px; cursor: grab; padding: 0 2px; }
+a.att-host { text-decoration: none; color: var(--soft); }
+a.att-host:hover { text-decoration: underline; color: var(--accent); }
+.att-item.drop-before { box-shadow: inset 0 3px 0 0 var(--accent); }
+.att-item.drop-after { box-shadow: inset 0 -3px 0 0 var(--accent); }
+.att-item.drag-ghost { display: flex; align-items: center; gap: 8px; padding: 7px 10px; list-style: none; font-size: 13.5px; border: 1px solid var(--accent); }
+.att-tip { margin-top: 4px !important; }
 .att-host { font-size: 12px; color: var(--soft); }
 .att-empty { color: var(--soft); font-size: 13px; }
 .att-add { display: grid; grid-template-columns: 1fr 1.3fr auto; gap: 6px; margin-top: 8px; }

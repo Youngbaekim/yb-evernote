@@ -11,7 +11,7 @@ import { DEVICE_ID } from './device.js';
 import QRCode from 'qrcode';
 import { newShareId, isWebUrl, hostLabel, normCode, CODE_RE } from './share-utils.js';
 
-const VERSION = 'v0.8.1 · 8단계';
+const VERSION = 'v0.8.2 · 8단계';
 const $ = (sel) => document.querySelector(sel);
 const app = $('#app');
 
@@ -1424,7 +1424,8 @@ async function openShare() {
         </div>
       </div>
       <h4 class="share-h">자료 링크 <small>OneDrive 공유 링크 → 열람 화면의 ‘내려받기’ 단추</small></h4>
-      <ul class="att-list">${atts.length ? atts.map((a, i) => `<li><span class="att-name">${esc(a.name)}</span><span class="att-host">${esc(hostLabel(a.url))}</span><button type="button" class="btn-text danger" data-att-del="${i}">삭제</button></li>`).join('') : '<li class="att-empty">첨부한 자료가 없습니다.</li>'}</ul>
+      <ul class="att-list">${atts.length ? atts.map((a, i) => `<li class="att-item" data-i="${i}"><span class="att-grip" title="끌어서 순서 바꾸기" aria-hidden="true">⋮⋮</span><input class="att-name" data-att-name="${i}" value="${esc(a.name)}" maxlength="80" title="눌러서 이름 고치기 (Enter로 저장)" aria-label="자료 이름" /><a class="att-host" href="${esc(a.url)}" target="_blank" rel="noopener" data-nodrag title="링크 열어 보기">${esc(hostLabel(a.url))}</a><button type="button" class="btn-text danger" data-nodrag data-att-del="${i}">삭제</button></li>`).join('') : '<li class="att-empty">첨부한 자료가 없습니다.</li>'}</ul>
+      ${atts.length > 1 ? '<p class="hint att-tip">이름은 눌러서 바로 고치고, 줄을 끌어 순서를 바꿉니다. (휴대폰은 길게 누른 뒤 끌기)</p>' : atts.length ? '<p class="hint att-tip">이름은 눌러서 바로 고칠 수 있습니다.</p>' : ''}
       <div class="att-add"><input id="att-name" placeholder="표시 이름 (예: 3주차 강의자료.pdf)" maxlength="80" /><input id="att-url" placeholder="공유 링크 (https://…)" inputmode="url" /><button type="button" class="btn-primary" id="att-add">추가</button></div>
       <p id="att-msg" class="hint"></p>
       <div class="row-btns" style="justify-content:space-between;margin-top:14px">
@@ -1454,6 +1455,27 @@ async function openShare() {
       await stopShare(fresh());
       draw();
     };
+    body.querySelectorAll('[data-att-name]').forEach((inp) => {
+      const commit = () => {
+        const i = Number(inp.dataset.attName);
+        const list = [...(fresh().attachments || [])];
+        const name = inp.value.trim();
+        if (!list[i]) return;
+        if (!name) { inp.value = list[i].name; return; } // 비우면 원래 이름으로
+        if (name === list[i].name) return;
+        list[i] = { ...list[i], name };
+        saveMeta({ attachments: list });
+        inp.classList.add('saved');
+        setTimeout(() => inp.classList.remove('saved'), 900);
+      };
+      inp.onchange = commit;
+      inp.onkeydown = (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); inp.blur(); }
+        if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); inp.value = (fresh().attachments || [])[Number(inp.dataset.attName)]?.name || ''; inp.blur(); }
+      };
+    });
+    attDraw = draw;
+    ensureAttSortable(body);
     body.querySelectorAll('[data-att-del]').forEach((b) => (b.onclick = () => {
       const list = [...(fresh().attachments || [])];
       list.splice(Number(b.dataset.attDel), 1);
@@ -1473,6 +1495,35 @@ async function openShare() {
   };
   await draw();
   if (!dlg.open) dlg.showModal();
+}
+
+/** 자료 링크 끌어서 순서 바꾸기 (게시 창이 처음 열릴 때 한 번만 연결) */
+let attDraw = null;
+let attSortable = false;
+function ensureAttSortable(root) {
+  if (attSortable) return;
+  attSortable = true;
+  makeSortable({
+    root,
+    item: '.att-item',
+    targets: '.att-item',
+    ghostParent: () => $('#share-dlg'),
+    places: () => ['before', 'after'],
+    onDrop: (src, t, place) => {
+      const n = current();
+      if (!n?.shareId) return;
+      const list = [...(n.attachments || [])];
+      const from = Number(src.dataset.i);
+      let to = Number(t.dataset.i) + (place === 'after' ? 1 : 0);
+      const [moved] = list.splice(from, 1);
+      if (from < to) to -= 1;
+      list.splice(to, 0, moved);
+      n.attachments = list;
+      store.updateFields('notes', n.id, { attachments: list });
+      publishNow(n);
+      attDraw?.();
+    },
+  });
 }
 
 /** 발표 화면: 프로젝터에 띄울 큰 주소 + QR */

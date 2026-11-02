@@ -28,7 +28,7 @@ export function makeSortable(o) {
     const ghost = el.cloneNode(true);
     ghost.classList.add('drag-ghost');
     ghost.style.width = `${r.width}px`;
-    document.body.appendChild(ghost);
+    (o.ghostParent?.() || document.body).appendChild(ghost); // 대화상자(맨 위 층) 안에서 끌 때는 그 안에
     el.classList.add('dragging');
     document.body.classList.add('is-dragging');
     drag = { el, ghost, dx: press.x - r.left, dy: press.y - r.top, target: null, place: null };
@@ -89,7 +89,7 @@ export function makeSortable(o) {
   o.root.addEventListener('pointerdown', (e) => {
     if (e.button !== 0 && e.pointerType === 'mouse') return;
     const el = e.target.closest(o.item);
-    if (!el || !o.root.contains(el) || e.target.closest('.f-more, .f-caret, .tag-chip')) return;
+    if (!el || !o.root.contains(el) || e.target.closest('.f-more, .f-caret, .tag-chip, input, textarea, select, [data-nodrag]')) return;
     if (o.enabled && !o.enabled(el)) return;
     press = { el, x: e.clientX, y: e.clientY, id: e.pointerId, type: e.pointerType };
     if (e.pointerType !== 'mouse') {
