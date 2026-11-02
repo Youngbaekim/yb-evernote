@@ -724,3 +724,6 @@ body.viewer :is(.img-menu, .img-h, .ink-bar, .ink-hint) { display: none !importa
 .att-pub:not(.on)::before { content: '⏸ '; }
 .att-pub.on::before { content: '● '; }
 .att-item.off input.att-name, .att-item.off .att-host { opacity: .45; text-decoration: line-through; }
+.nc-globe { display: inline-block; filter: grayscale(1); opacity: .55; }
+.nc-globe.on { filter: none; opacity: 1; }
+.ctx-menu button:disabled { opacity: .45; cursor: default; }

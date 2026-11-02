@@ -11,7 +11,7 @@ import { DEVICE_ID } from './device.js';
 import QRCode from 'qrcode';
 import { newShareId, isWebUrl, hostLabel, normCode, CODE_RE } from './share-utils.js';
 
-const VERSION = 'v0.8.5 · 8단계';
+const VERSION = 'v0.8.6 · 8단계';
 const $ = (sel) => document.querySelector(sel);
 const app = $('#app');
 
@@ -1394,15 +1394,45 @@ function noteCardMenu(id, x, y) {
   const n = state.notes.find((v) => v.id === id);
   if (!n || n.trashedAt) return;
   const menu = $('#ctx-menu');
-  menu.innerHTML = `<button data-nc="copy">⧉ 노트 복제</button>`;
+  const lockedNow = n.locked && !isUnlocked();
+  menu.innerHTML = `
+    <button data-nc="rename">이름 변경</button>
+    <button data-nc="copy">⧉ 노트 복제</button>
+    <button data-nc="share" ${n.locked ? 'disabled title="잠긴 노트는 웹에 게시할 수 없습니다"' : ''}><span class="nc-globe${n.shareId ? ' on' : ''}">🌐</span> ${n.shareId ? '웹 게시 설정 (게시 중)' : '웹에 게시'}</button>
+    <button data-nc="delete" class="danger">노트 삭제</button>`;
   menu.hidden = false;
-  menu.style.left = `${Math.min(x, window.innerWidth - 200)}px`;
-  menu.style.top = `${Math.min(y, window.innerHeight - 60)}px`;
-  menu.onclick = (e) => {
-    const act = e.target.closest('[data-nc]')?.dataset.nc;
+  menu.style.left = `${Math.min(x, window.innerWidth - 220)}px`;
+  menu.style.top = `${Math.min(y, window.innerHeight - 180)}px`;
+  menu.onclick = async (e) => {
+    const btn = e.target.closest('[data-nc]');
+    if (!btn || btn.disabled) return;
+    const act = btn.dataset.nc;
     menu.hidden = true;
-    if (act === 'copy') duplicateNote(id);
+    if (act === 'rename') return renameNote(n);
+    if (act === 'copy') return duplicateNote(id);
+    if (state.noteId !== id) await openNote(id); // 게시·삭제는 그 노트를 연 상태에서 기존 흐름 그대로
+    if (act === 'share') { if (lockedNow) return; return openShare(); }
+    if (act === 'delete') return deleteNote();
   };
+}
+
+/** 목록에서 제목 바꾸기 (#태그 포함 전체 제목) */
+async function renameNote(n) {
+  if (n.id === state.noteId) await flushSave();
+  const t = prompt('노트 제목 (#태그를 붙일 수 있음)', n.title || '');
+  if (t === null) return;
+  const title = t.trim();
+  if (title === (n.title || '')) return;
+  n.title = title;
+  n.tags = tagsOf(title);
+  n.updatedAt = Date.now();
+  store.updateFields('notes', n.id, { title, tags: n.tags, updatedAt: n.updatedAt });
+  if (n.shareId) schedulePublish(n, true); // 게시 중이면 열람 화면 제목도 바로
+  if (n.id === state.noteId) {
+    $('#note-title').value = title;
+    document.title = `${titleOf(n)} - YB-EverNote`;
+  }
+  renderList();
 }
 $('#note-list').addEventListener('contextmenu', (e) => {
   const card = e.target.closest('[data-note]');
