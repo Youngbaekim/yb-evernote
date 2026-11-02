@@ -664,8 +664,10 @@ body.resizing-sheet { cursor: ew-resize; user-select: none; }
 .att-add input { min-width: 0; padding: 7px 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); color: var(--ink); font: inherit; font-size: 13px; }
 @media (max-width: 520px) { .att-add { grid-template-columns: 1fr auto; } .att-add #att-name { grid-column: 1 / -1; } .share-qr img { width: 104px; height: 104px; } }
 .qr-big { position: fixed; inset: 0; z-index: 9999; display: grid; place-content: center; justify-items: center; gap: 10px; background: #fff; color: #222; cursor: zoom-out; padding: 16px; text-align: center; }
-.qr-big img { width: min(80vmin, 640px); height: auto; image-rendering: pixelated; }
-.qr-big p { margin: 0; font: 15px/1.4 ui-monospace, Consolas, monospace; word-break: break-all; }
+.qr-big img { width: min(42vh, 60vw, 520px); height: auto; image-rendering: pixelated; }
+.qr-big .qb-name { margin: 0; font-size: clamp(18px, 3vw, 34px); font-weight: 700; color: #243e6b; }
+.qr-big .qb-url { margin: 0; font: 600 clamp(22px, 5.2vw, 72px)/1.25 Pretendard, 'Noto Sans KR', sans-serif; letter-spacing: -.01em; word-break: break-all; color: #333; }
+.qr-big .qb-url b { color: #243e6b; font-weight: 800; }
 .qr-big small { color: #888; }
 #btn-share.on { color: #1f8a4c; }
 
@@ -696,3 +698,8 @@ body.viewer :is(.img-menu, .img-h, .ink-bar, .ink-hint) { display: none !importa
 .share-opts .share-field { min-width: 0; }
 .share-h small { display: block; margin: 2px 0 0; }
 @media (max-width: 520px) { .share-opts .share-field { flex-wrap: wrap; gap: 2px 8px; } .share-opts .share-field select, .share-opts .share-field input { flex-basis: 100%; width: 100%; } }
+
+.share-code .code-pre { flex: none; font: 12.5px ui-monospace, Consolas, monospace; color: var(--soft); }
+.share-code input { font-family: ui-monospace, Consolas, monospace; }
+.v-theme { flex: none; padding: 4px 6px; font-size: 12.5px; border: 1px solid var(--line); border-radius: 8px; background: var(--pane); color: var(--ink); }
+@media (max-width: 420px) { .v-name { display: none; } }

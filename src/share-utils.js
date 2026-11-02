@@ -40,3 +40,7 @@ export function newShareId() {
 }
 
 export const stripTags = (t) => (t || '').replace(/#([\p{L}\p{N}_-]+)/gu, '').replace(/\s{2,}/g, ' ').trim(); // 편집 앱과 같은 규칙
+
+/** 주소 코드: 영문 소문자·숫자·하이픈, 3~20자 (무작위 ID 16자도 같은 규칙) */
+export const CODE_RE = /^[a-z0-9](?:[a-z0-9-]{1,30}[a-z0-9])$/;
+export const normCode = (s) => String(s || '').trim().toLowerCase().replace(/\s+/g, '-');

@@ -1,13 +1,18 @@
 // 웹에 게시한 노트 열람 화면 (로그인 없음 · 읽기 전용 · 실시간 반영)
 import './style.css';
-import './theme.js';
+import { getTheme, setTheme } from './theme.js';
 import { useReadOnlyBase, watchPublic } from './store.js';
 import { createEditor, hydrateJSON } from './editor.js';
-import { downloadUrl, hostLabel, stripTags } from './share-utils.js';
+import { downloadUrl, hostLabel, stripTags, CODE_RE } from './share-utils.js';
 
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
-const sid = new URLSearchParams(location.search).get('s') || '';
+// 다크 모드만은 열람자가 바꿀 수 있음 (이 기기에만 기억)
+const themeSel = document.querySelector('#v-theme');
+themeSel.value = getTheme();
+themeSel.onchange = () => setTheme(themeSel.value);
+
+const sid = (new URLSearchParams(location.search).get('s') || '').toLowerCase();
 
 function message(title, sub = '') {
   $('#editor').hidden = true;
@@ -17,7 +22,7 @@ function message(title, sub = '') {
   $('#v-msg').innerHTML = `<p class="ph-title">${esc(title)}</p>${sub ? `<p>${esc(sub)}</p>` : ''}`;
 }
 
-if (!/^[a-z0-9]{12,32}$/.test(sid)) {
+if (!CODE_RE.test(sid)) {
   message('주소가 올바르지 않습니다', '받은 주소 전체를 다시 확인해 주세요.');
 } else {
   useReadOnlyBase(sid);

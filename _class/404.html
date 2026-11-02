@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<meta name="robots" content="noindex" />
+<title>YB 노트</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #f4f5f7; font-family: Pretendard, 'Noto Sans KR', sans-serif; }
+  iframe { display: block; width: 100%; height: 100%; border: 0; }
+</style>
+</head>
+<body>
+<script>
+  // youngbaekim.github.io/class/코드 → 열람 화면을 이 주소 그대로 보여 줌 (주소창은 짧은 주소 유지)
+  // GitHub Pages는 없는 경로에 이 404.html을 보여 주므로, 경로의 마지막 부분을 코드로 읽음
+  (function () {
+    var parts = location.pathname.split('/').filter(Boolean); // ['class', '코드']
+    var code = decodeURIComponent(parts[1] || location.hash.slice(1) || '').toLowerCase();
+    if (!/^[a-z0-9](?:[a-z0-9-]{1,30}[a-z0-9])$/.test(code)) { location.replace('/class/'); return; }
+    var f = document.createElement('iframe');
+    f.src = '/yb-evernote/view.html?s=' + encodeURIComponent(code);
+    f.title = 'YB 노트';
+    f.allow = 'clipboard-write';
+    f.onload = function () { try { document.title = f.contentDocument.title; new MutationObserver(function () { document.title = f.contentDocument.title; }).observe(f.contentDocument.querySelector('title'), { childList: true }); } catch (e) {} };
+    document.body.appendChild(f);
+  })();
+</script>
+</body>
+</html>

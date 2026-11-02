@@ -1,7 +1,8 @@
 // 다크 모드 선택: system(기기 설정 따름) · dark(항상 켜기) · light(항상 끄기)
 // 기기마다 따로 기억 (PC는 끄고 폰은 시스템 설정을 따르는 식으로 쓸 수 있게)
 // 방식: 스타일시트의 @media (prefers-color-scheme: dark) 규칙을 켜거나(all) 끄거나(not all) 원래대로 되돌림
-const KEY = 'yb-theme';
+// 열람 화면(view.html)은 따로 기억 (같은 기기에서 편집 앱 설정과 섞이지 않도록)
+const KEY = document.body?.classList.contains('viewer') ? 'yb-view-theme' : 'yb-theme';
 const orig = new WeakMap();
 
 export function getTheme() {

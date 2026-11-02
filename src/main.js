@@ -9,9 +9,9 @@ import { newDrawingAttrs, flushAllDrawings, getDrawingView, resetZoom } from './
 import { makeSortable } from './sortable.js';
 import { DEVICE_ID } from './device.js';
 import QRCode from 'qrcode';
-import { newShareId, isWebUrl, hostLabel } from './share-utils.js';
+import { newShareId, isWebUrl, hostLabel, normCode, CODE_RE } from './share-utils.js';
 
-const VERSION = 'v0.8.0 · 8단계';
+const VERSION = 'v0.8.1 · 8단계';
 const $ = (sel) => document.querySelector(sel);
 const app = $('#app');
 
@@ -1292,7 +1292,10 @@ window.addEventListener('pagehide', flushSave);
    - 본문은 정한 간격(5초·30초·수동)으로 반영, 필기·그림은 저장할 때 바로 반영
    - 자료 파일은 OneDrive에만 두고 링크(이름 + 주소)만 첨부 */
 store.setShareResolver((noteId) => state.notes.find((n) => n.id === noteId && !n.trashedAt && !n.locked)?.shareId || null);
-const viewUrl = (sid) => new URL(`${import.meta.env.BASE_URL}view.html?s=${sid}`, location.origin).href;
+const longUrl = (sid) => new URL(`${import.meta.env.BASE_URL}view.html?s=${sid}`, location.origin).href;
+// 짧은 주소: youngbaekim.github.io/class/코드 (class 저장소의 안내 쪽이 열람 화면을 띄움). 시험 환경에서는 긴 주소
+const SHORT_BASE = 'https://youngbaekim.github.io/class/';
+const viewUrl = (sid) => (import.meta.env.PROD && location.hostname === 'youngbaekim.github.io' ? SHORT_BASE + sid : longUrl(sid));
 const SHARE_INTERVALS = [[5, '5초마다'], [30, '30초마다'], [0, '수동 (지금 반영 단추)']];
 const pubTimers = new Map(); // 노트 ID → 예약 타이머
 const lastPub = new Map(); // 노트 ID → 마지막 반영 시각
@@ -1330,9 +1333,28 @@ async function stopShare(n, refresh = true) {
   if (refresh) renderEditorHeader({ keepTitle: true });
 }
 
-async function startShare(n, name) {
+/** 주소 코드 확인: 비어 있으면 무작위, 이미 쓰는 코드면 이어받기 여부를 물음. 쓸 수 없으면 null */
+async function resolveCode(raw, n) {
+  if (!raw) return newShareId();
+  const code = normCode(raw);
+  if (!CODE_RE.test(code)) { alert('주소 코드는 영문 소문자·숫자·하이픈(-)으로 3~20자입니다.\n예: kcce, ai1105, ssu-day1'); return null; }
+  const other = state.notes.find((x) => x.shareId === code && x.id !== n.id);
+  if (other) {
+    if (!confirm(`‘${code}’ 코드는 지금 ‘${titleOf(other)}’ 노트가 쓰고 있습니다.\n그 노트의 게시를 중지하고, 이 노트를 같은 주소로 이어서 게시할까요?\n(열람 중인 화면은 새 노트로 자동으로 바뀝니다)`)) return null;
+    await stopShare(other, false);
+    return code;
+  }
+  const info = await store.publicInfo(code);
+  if (info.error) { alert('코드를 확인하지 못했습니다. 인터넷 연결을 확인해 주세요.'); return null; }
+  if (info.exists && info.owner !== state.user?.uid) { alert(`‘${code}’ 코드는 이미 다른 사람이 쓰고 있습니다. 다른 코드를 정해 주세요.`); return null; }
+  if (info.exists) await store.unpublish(code); // 예전에 내가 쓰던 코드의 남은 사본 정리
+  return code;
+}
+
+const lastCode = () => { try { return localStorage.getItem('yb-last-code') || ''; } catch { return ''; } };
+async function startShare(n, name, sid) {
+  if (CODE_RE.test(sid) && sid.length <= 20) { try { localStorage.setItem('yb-last-code', sid); } catch { /* 무시 */ } }
   await flushSave();
-  const sid = newShareId();
   n.shareId = sid;
   n.shareName = name || n.shareName || 'YB 노트';
   n.shareInterval = n.shareInterval ?? 5;
@@ -1370,14 +1392,20 @@ async function openShare() {
           <li>자료 파일은 OneDrive에 올린 뒤 ‘링크가 있는 모든 사용자’ 공유 링크를 첨부합니다.</li>
         </ul>
         <label class="share-field">열람 화면 머리말 <input id="share-name" maxlength="40" value="${esc(n.shareName || 'YB 노트')}" /></label>
+        <label class="share-field share-code">주소 코드 <span class="code-pre">…/class/</span><input id="share-code" maxlength="20" autocapitalize="off" autocomplete="off" spellcheck="false" placeholder="예: kcce (비우면 무작위)" value="${esc(lastCode())}" /></label>
+        <p class="hint">특강처럼 주소를 불러 주거나 화면에 띄울 때는 짧은 코드를 정하세요. 코드를 아는 사람은 누구나 볼 수 있으니 공개해도 되는 내용에만 씁니다.</p>
         <div class="row-btns" style="justify-content:flex-end;margin-top:14px">
           <button class="btn-ghost" value="close">닫기</button>
           <button type="button" class="btn-primary" id="share-start">🌐 웹에 게시</button>
         </div>`;
       body.querySelector('#share-start').onclick = async (e) => {
-        e.currentTarget.disabled = true;
-        e.currentTarget.textContent = '게시 중…';
-        await startShare(fresh(), body.querySelector('#share-name').value.trim());
+        const btn = e.currentTarget;
+        btn.disabled = true;
+        btn.textContent = '확인 중…';
+        const sid = await resolveCode(body.querySelector('#share-code').value.trim(), fresh());
+        if (!sid) { btn.disabled = false; btn.textContent = '🌐 웹에 게시'; return; }
+        btn.textContent = '게시 중…';
+        await startShare(fresh(), body.querySelector('#share-name').value.trim(), sid);
         draw();
       };
       return;
@@ -1387,12 +1415,12 @@ async function openShare() {
     const atts = n.attachments || [];
     body.innerHTML = `
       <div class="share-live">● 게시 중 <span id="share-status" class="share-status"></span></div>
-      <div class="share-url"><input id="share-url" readonly value="${esc(url)}" /><button type="button" class="btn-ghost" id="share-copy">복사</button><a class="btn-ghost" href="${esc(url)}" target="_blank" rel="noopener">열기</a></div>
+      <div class="share-url"><input id="share-url" readonly value="${esc(url.replace(/^https:\/\//, ''))}" /><button type="button" class="btn-ghost" id="share-copy">복사</button><a class="btn-ghost" href="${esc(url)}" target="_blank" rel="noopener">열기</a></div>
       <div class="share-qr"><img id="share-qr" src="${qr}" alt="열람 주소 QR 코드" width="132" height="132" />
         <div class="share-opts">
           <label class="share-field">반영 간격 <select id="share-iv">${SHARE_INTERVALS.map(([v, l]) => `<option value="${v}" ${v === (n.shareInterval ?? 5) ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
           <label class="share-field">머리말 <input id="share-name" maxlength="40" value="${esc(n.shareName || 'YB 노트')}" /></label>
-          <div class="row-btns"><button type="button" class="btn-ghost" id="share-now">지금 반영</button><button type="button" class="btn-ghost" id="share-big">QR 크게</button></div>
+          <div class="row-btns"><button type="button" class="btn-ghost" id="share-now">지금 반영</button><button type="button" class="btn-ghost" id="share-big">발표 화면</button></div>
         </div>
       </div>
       <h4 class="share-h">자료 링크 <small>OneDrive 공유 링크 → 열람 화면의 ‘내려받기’ 단추</small></h4>
@@ -1420,7 +1448,7 @@ async function openShare() {
     };
     body.querySelector('#share-name').onchange = (e) => saveMeta({ shareName: e.target.value.trim() || 'YB 노트' });
     body.querySelector('#share-now').onclick = async () => { await flushSave(); publishNow(fresh()); };
-    body.querySelector('#share-big').onclick = () => showBigQR(qr, url);
+    body.querySelector('#share-big').onclick = () => showBigQR(qr, url, n.shareName);
     body.querySelector('#share-stop').onclick = async () => {
       if (!confirm('게시를 중지할까요?\n열람 중인 화면에는 ‘게시가 종료되었습니다’가 표시되고, 이 주소는 다시 쓸 수 없습니다.')) return;
       await stopShare(fresh());
@@ -1447,10 +1475,16 @@ async function openShare() {
   if (!dlg.open) dlg.showModal();
 }
 
-function showBigQR(src, url) {
+/** 발표 화면: 프로젝터에 띄울 큰 주소 + QR */
+function showBigQR(src, url, name) {
   const ov = document.createElement('div');
   ov.className = 'qr-big';
-  ov.innerHTML = `<img src="${src}" alt="QR 코드" /><p>${esc(url)}</p><small>아무 곳이나 누르면 닫힘</small>`;
+  const plain = url.replace(/^https?:\/\//, '');
+  const cut = plain.includes('?s=') ? plain.indexOf('?s=') + 3 : plain.lastIndexOf('/') + 1;
+  ov.innerHTML = `<p class="qb-name">${esc(name || '')}</p>
+    <p class="qb-url">${esc(plain.slice(0, cut))}<b>${esc(plain.slice(cut))}</b></p>
+    <img src="${src}" alt="QR 코드" />
+    <small>브라우저 주소창에 위 주소를 입력하세요 · 아무 곳이나 누르면 닫힘</small>`;
   ov.onclick = () => ov.remove();
   ($('#share-dlg').open ? $('#share-dlg') : document.body).appendChild(ov);
 }

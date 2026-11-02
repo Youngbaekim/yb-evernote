@@ -437,3 +437,13 @@ export async function unpublish(sid) {
 export function watchPublic(sid, cb) {
   return onSnapshot(pubRef(sid), (d) => cb(d.exists() ? d.data() : null), (err) => { report('게시 노트 읽기')(err); cb(null); });
 }
+
+/** 주소 코드 사용 여부 (누구나 읽기 가능한 문서라 로그인 없이도 확인됨) */
+export async function publicInfo(sid) {
+  try {
+    const d = await getDoc(pubRef(sid));
+    return { exists: d.exists(), owner: d.exists() ? d.data().owner : null };
+  } catch (err) {
+    return { error: err };
+  }
+}
