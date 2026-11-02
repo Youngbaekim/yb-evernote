@@ -1,6 +1,6 @@
 // 필기 블록 — 텍스트 노트 안에 넣는 필압 펜 영역 (벡터 저장, 획 묶음 단위 기록)
 import { Node, mergeAttributes } from '@tiptap/core';
-import { putChunk, subscribeChunks, compactChunks, putImage, getImage, newId } from './store.js';
+import { putChunk, subscribeChunks, compactChunks, putImage, getImage, newId, isReadOnly } from './store.js';
 import { compressImage } from './image.js';
 import { DEVICE_ID } from './device.js';
 import {
@@ -328,7 +328,7 @@ class DrawingView {
 
   /** 묶음 정리: 남아 있는 획만 새 묶음으로 (지운 획 기록·자잘한 묶음 정리 → 읽기 건수·용량 절감) */
   compact(docs) {
-    if (!navigator.onLine || this.current || this.pending.size) return;
+    if (isReadOnly() || !navigator.onLine || this.current || this.pending.size) return;
     const records = [...this.strokes.values()].map((s) => this.toRecord(s));
     const createdAt = Math.max(...docs.map((d) => d.createdAt));
     const ids = compactChunks({

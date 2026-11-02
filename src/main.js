@@ -8,8 +8,10 @@ import { createEditor, toStorableJSON, hydrateJSON, setSearchTerm, FONTS, SIZES,
 import { newDrawingAttrs, flushAllDrawings, getDrawingView, resetZoom } from './drawing.js';
 import { makeSortable } from './sortable.js';
 import { DEVICE_ID } from './device.js';
+import QRCode from 'qrcode';
+import { newShareId, isWebUrl, hostLabel } from './share-utils.js';
 
-const VERSION = 'v0.7.7 · 7단계';
+const VERSION = 'v0.8.0 · 8단계';
 const $ = (sel) => document.querySelector(sel);
 const app = $('#app');
 
@@ -116,6 +118,7 @@ async function flushSave() {
   note.preview = editor.getText({ blockSeparator: '\n' }).trim().slice(0, 120);
   note.updatedAt = Date.now();
   store.saveNote(note);
+  schedulePublish(note);
   setSaveState('저장됨');
   if (note.id === state.noteId) document.title = `${titleOf(note)} - YB-EverNote`;
   renderList();
@@ -188,6 +191,7 @@ async function openHistory() {
     cur.updatedAt = Date.now();
     cur.verAt = Date.now();
     store.saveNote(cur);
+    schedulePublish(cur, true);
     dlg.close();
     await openNote(cur.id);
     renderList();
@@ -336,6 +340,8 @@ async function toggleLock() {
       alert('먼저 잠금 비밀번호를 정합니다. (모든 잠긴 노트에 같은 비밀번호를 씁니다)');
       if (!(await setPin())) return;
     }
+    if (n.shareId && !confirm('웹에 게시 중인 노트입니다. 잠그면 게시가 중지됩니다. 계속할까요?')) return;
+    if (n.shareId) await stopShare(n, false);
     n.locked = true;
     unlockedUntil = Date.now() + UNLOCK_MS; // 잠근 직후에는 계속 볼 수 있음
   }
@@ -652,6 +658,9 @@ function renderEditorHeader({ keepTitle = false } = {}) {
   $('#btn-lock').textContent = note?.locked ? '🔒' : '🔓';
   $('#btn-lock').title = note?.locked ? '잠긴 노트 (눌러서 잠금 해제)' : '이 노트 잠그기';
   $('#btn-lock').classList.toggle('on', !!note?.locked);
+  $('#btn-share').disabled = !has || trashed || !!note?.locked;
+  $('#btn-share').classList.toggle('on', !!note?.shareId);
+  $('#btn-share').title = note?.shareId ? '웹에 게시 중 (주소·QR·자료 링크)' : note?.locked ? '잠긴 노트는 웹에 게시할 수 없습니다' : '웹에 게시 (실시간 공유)';
   $('#btn-print').disabled = !has || (note?.locked && !isUnlocked());
   $('#btn-history').disabled = !has || trashed || (note?.locked && !isUnlocked());
   $('#btn-delete').title = trashed ? '영구 삭제' : '휴지통으로';
@@ -873,7 +882,7 @@ function folderMenu(id, anchor) {
 /** 휴대폰: 잠금·이전 버전·인쇄·삭제를 ⋯ 메뉴로 (PC·태블릿은 머리줄 단추 그대로) */
 function noteMenu(anchor) {
   const menu = $('#ctx-menu');
-  const items = ['#btn-lock', '#btn-history', '#btn-print', '#btn-delete']
+  const items = ['#btn-share', '#btn-lock', '#btn-history', '#btn-print', '#btn-delete']
     .map((id) => $(id))
     .filter((b) => !b.disabled)
     .map((b) => `<button data-nm="${b.id}" class="${b.id === 'btn-delete' ? 'danger' : ''}">${b.textContent} ${esc(b.title)}</button>`);
@@ -1028,6 +1037,7 @@ async function deleteNote() {
   await flushSave();
   if (n.trashedAt) return purgeNote();
   if (!confirm(`'${titleOf(n)}' 노트를 휴지통으로 옮길까요?\n휴지통에서 ${TRASH_DAYS}일 동안 복원할 수 있고, 그 뒤 자동으로 영구 삭제됩니다.`)) return;
+  if (n.shareId) await stopShare(n, false);
   n.trashedAt = Date.now();
   store.saveNote(n);
   await openNote(null);
@@ -1046,6 +1056,7 @@ async function restoreNote() {
 async function purgeNote() {
   const n = current();
   if (!n || !confirm('이 노트를 영구 삭제할까요? 되돌릴 수 없습니다.')) return;
+  if (n.shareId) store.unpublish(n.shareId);
   store.purgeNote(n.id);
   state.notes = state.notes.filter((x) => x.id !== n.id);
   await openNote(null);
@@ -1061,7 +1072,7 @@ function purgeExpired() {
   const limit = Date.now() - TRASH_DAYS * DAY;
   const old = state.notes.filter((n) => n.trashedAt && n.trashedAt < limit);
   if (!old.length) return;
-  old.forEach((n) => store.purgeNote(n.id));
+  old.forEach((n) => { if (n.shareId) store.unpublish(n.shareId); store.purgeNote(n.id); });
   state.notes = state.notes.filter((n) => !old.includes(n));
   if (old.some((n) => n.id === state.noteId)) openNote(null);
   renderList();
@@ -1072,7 +1083,7 @@ async function emptyTrash() {
   const list = state.notes.filter((n) => n.trashedAt);
   if (!list.length) return;
   if (!confirm(`휴지통의 노트 ${list.length}개를 모두 영구 삭제할까요?\n그림·필기·이전 버전도 함께 지워지며 되돌릴 수 없습니다.`)) return;
-  list.forEach((n) => store.purgeNote(n.id));
+  list.forEach((n) => { if (n.shareId) store.unpublish(n.shareId); store.purgeNote(n.id); });
   state.notes = state.notes.filter((n) => !n.trashedAt);
   if (list.some((n) => n.id === state.noteId)) await openNote(null);
   renderList();
@@ -1194,6 +1205,7 @@ $('#btn-fav').addEventListener('click', toggleFav);
 $('#btn-delete').addEventListener('click', deleteNote);
 $('#btn-more').addEventListener('click', (e) => { const m = $('#ctx-menu'); if (!m.hidden && m.querySelector('[data-nm]')) { m.hidden = true; return; } noteMenu(e.currentTarget); });
 $('#btn-lock').addEventListener('click', toggleLock);
+$('#btn-share').addEventListener('click', openShare);
 $('#btn-print').addEventListener('click', printNote);
 $('#btn-history').addEventListener('click', openHistory);
 $('#btn-layout').addEventListener('click', cycleLayout);
@@ -1274,6 +1286,174 @@ document.addEventListener('visibilitychange', () => {
 });
 setInterval(() => { if (unlockedUntil && !isUnlocked()) { unlockedUntil = 0; relock(); } }, 30 * 1000);
 window.addEventListener('pagehide', flushSave);
+
+/* ───────── 웹에 게시 (실시간 공유) ─────────
+   - 노트의 공개 사본을 public/{공유ID}에 두고, 로그인 없이 view.html?s=공유ID 로 읽기 전용 열람
+   - 본문은 정한 간격(5초·30초·수동)으로 반영, 필기·그림은 저장할 때 바로 반영
+   - 자료 파일은 OneDrive에만 두고 링크(이름 + 주소)만 첨부 */
+store.setShareResolver((noteId) => state.notes.find((n) => n.id === noteId && !n.trashedAt && !n.locked)?.shareId || null);
+const viewUrl = (sid) => new URL(`${import.meta.env.BASE_URL}view.html?s=${sid}`, location.origin).href;
+const SHARE_INTERVALS = [[5, '5초마다'], [30, '30초마다'], [0, '수동 (지금 반영 단추)']];
+const pubTimers = new Map(); // 노트 ID → 예약 타이머
+const lastPub = new Map(); // 노트 ID → 마지막 반영 시각
+const pendingPub = new Set(); // 수동 모드에서 아직 반영하지 않은 노트
+
+function publishNow(n) {
+  if (!n?.shareId || n.locked || n.trashedAt) return;
+  clearTimeout(pubTimers.get(n.id));
+  pubTimers.delete(n.id);
+  pendingPub.delete(n.id);
+  lastPub.set(n.id, Date.now());
+  store.publishNote(n.shareId, n);
+  renderShareStatus();
+}
+function schedulePublish(n, now = false) {
+  if (!n?.shareId || n.locked || n.trashedAt) return;
+  const iv = n.shareInterval ?? 5;
+  if (now) return publishNow(n);
+  if (iv === 0) { pendingPub.add(n.id); renderShareStatus(); return; }
+  if (pubTimers.has(n.id)) return; // 이미 예약됨 (예약 시점에 최신 내용으로 반영)
+  const wait = Math.max(0, (lastPub.get(n.id) || 0) + iv * 1000 - Date.now());
+  pubTimers.set(n.id, setTimeout(() => publishNow(state.notes.find((x) => x.id === n.id) || n), wait));
+}
+
+/** 게시 중지 (askConfirm=false: 휴지통·잠금처럼 이미 확인을 받은 경우) */
+async function stopShare(n, refresh = true) {
+  const sid = n.shareId;
+  if (!sid) return;
+  clearTimeout(pubTimers.get(n.id));
+  pubTimers.delete(n.id);
+  pendingPub.delete(n.id);
+  n.shareId = null;
+  store.updateFields('notes', n.id, { shareId: null });
+  await store.unpublish(sid);
+  if (refresh) renderEditorHeader({ keepTitle: true });
+}
+
+async function startShare(n, name) {
+  await flushSave();
+  const sid = newShareId();
+  n.shareId = sid;
+  n.shareName = name || n.shareName || 'YB 노트';
+  n.shareInterval = n.shareInterval ?? 5;
+  n.attachments = n.attachments || [];
+  store.updateFields('notes', n.id, { shareId: sid, shareName: n.shareName, shareInterval: n.shareInterval, attachments: n.attachments });
+  lastPub.set(n.id, Date.now());
+  await store.publishNote(sid, n);
+  await store.copyNoteMedia(sid, n.id);
+  renderEditorHeader({ keepTitle: true });
+}
+
+const fmtClock = (t) => (t ? new Date(t).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '—');
+function renderShareStatus() {
+  const el = $('#share-status');
+  const n = current();
+  if (!el || !n?.shareId) return;
+  el.textContent = pendingPub.has(n.id) ? `반영 대기 중 (마지막 반영 ${fmtClock(lastPub.get(n.id))})` : `마지막 반영 ${fmtClock(lastPub.get(n.id))}`;
+  el.classList.toggle('wait', pendingPub.has(n.id));
+}
+
+async function openShare() {
+  let n = current();
+  if (!n || n.trashedAt) return;
+  if (n.locked) return alert('잠긴 노트는 웹에 게시할 수 없습니다.\n잠금을 해제한 뒤 게시해 주세요.');
+  const dlg = $('#share-dlg');
+  const body = dlg.querySelector('.share-body');
+  const fresh = () => (n = state.notes.find((x) => x.id === n.id) || n); // 동기화로 바뀐 최신 노트 객체
+  const draw = async () => {
+    fresh();
+    if (!n.shareId) {
+      body.innerHTML = `
+        <p class="hint" style="margin-top:0">이 노트를 로그인 없이 볼 수 있는 웹 주소로 게시합니다. 고치는 내용이 열람 화면에 자동으로 반영되며, 열람자는 고칠 수 없습니다.</p>
+        <ul class="share-notes">
+          <li>주소를 아는 사람은 누구나 볼 수 있습니다. 개인정보가 없는지 확인해 주세요.</li>
+          <li>자료 파일은 OneDrive에 올린 뒤 ‘링크가 있는 모든 사용자’ 공유 링크를 첨부합니다.</li>
+        </ul>
+        <label class="share-field">열람 화면 머리말 <input id="share-name" maxlength="40" value="${esc(n.shareName || 'YB 노트')}" /></label>
+        <div class="row-btns" style="justify-content:flex-end;margin-top:14px">
+          <button class="btn-ghost" value="close">닫기</button>
+          <button type="button" class="btn-primary" id="share-start">🌐 웹에 게시</button>
+        </div>`;
+      body.querySelector('#share-start').onclick = async (e) => {
+        e.currentTarget.disabled = true;
+        e.currentTarget.textContent = '게시 중…';
+        await startShare(fresh(), body.querySelector('#share-name').value.trim());
+        draw();
+      };
+      return;
+    }
+    const url = viewUrl(n.shareId);
+    const qr = await QRCode.toDataURL(url, { margin: 1, width: 360, errorCorrectionLevel: 'M' });
+    const atts = n.attachments || [];
+    body.innerHTML = `
+      <div class="share-live">● 게시 중 <span id="share-status" class="share-status"></span></div>
+      <div class="share-url"><input id="share-url" readonly value="${esc(url)}" /><button type="button" class="btn-ghost" id="share-copy">복사</button><a class="btn-ghost" href="${esc(url)}" target="_blank" rel="noopener">열기</a></div>
+      <div class="share-qr"><img id="share-qr" src="${qr}" alt="열람 주소 QR 코드" width="132" height="132" />
+        <div class="share-opts">
+          <label class="share-field">반영 간격 <select id="share-iv">${SHARE_INTERVALS.map(([v, l]) => `<option value="${v}" ${v === (n.shareInterval ?? 5) ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+          <label class="share-field">머리말 <input id="share-name" maxlength="40" value="${esc(n.shareName || 'YB 노트')}" /></label>
+          <div class="row-btns"><button type="button" class="btn-ghost" id="share-now">지금 반영</button><button type="button" class="btn-ghost" id="share-big">QR 크게</button></div>
+        </div>
+      </div>
+      <h4 class="share-h">자료 링크 <small>OneDrive 공유 링크 → 열람 화면의 ‘내려받기’ 단추</small></h4>
+      <ul class="att-list">${atts.length ? atts.map((a, i) => `<li><span class="att-name">${esc(a.name)}</span><span class="att-host">${esc(hostLabel(a.url))}</span><button type="button" class="btn-text danger" data-att-del="${i}">삭제</button></li>`).join('') : '<li class="att-empty">첨부한 자료가 없습니다.</li>'}</ul>
+      <div class="att-add"><input id="att-name" placeholder="표시 이름 (예: 3주차 강의자료.pdf)" maxlength="80" /><input id="att-url" placeholder="공유 링크 (https://…)" inputmode="url" /><button type="button" class="btn-primary" id="att-add">추가</button></div>
+      <p id="att-msg" class="hint"></p>
+      <div class="row-btns" style="justify-content:space-between;margin-top:14px">
+        <button type="button" class="btn-ghost danger-ghost" id="share-stop">게시 중지</button>
+        <button class="btn-ghost" value="close">닫기</button>
+      </div>`;
+    renderShareStatus();
+    const saveMeta = (fields) => {
+      fresh();
+      Object.assign(n, fields);
+      store.updateFields('notes', n.id, fields);
+      publishNow(n);
+    };
+    body.querySelector('#share-copy').onclick = async (e) => {
+      try { await navigator.clipboard.writeText(url); } catch { body.querySelector('#share-url').select(); document.execCommand('copy'); }
+      e.currentTarget.textContent = '복사됨';
+    };
+    body.querySelector('#share-iv').onchange = (e) => {
+      const v = Number(e.target.value);
+      saveMeta({ shareInterval: v });
+    };
+    body.querySelector('#share-name').onchange = (e) => saveMeta({ shareName: e.target.value.trim() || 'YB 노트' });
+    body.querySelector('#share-now').onclick = async () => { await flushSave(); publishNow(fresh()); };
+    body.querySelector('#share-big').onclick = () => showBigQR(qr, url);
+    body.querySelector('#share-stop').onclick = async () => {
+      if (!confirm('게시를 중지할까요?\n열람 중인 화면에는 ‘게시가 종료되었습니다’가 표시되고, 이 주소는 다시 쓸 수 없습니다.')) return;
+      await stopShare(fresh());
+      draw();
+    };
+    body.querySelectorAll('[data-att-del]').forEach((b) => (b.onclick = () => {
+      const list = [...(fresh().attachments || [])];
+      list.splice(Number(b.dataset.attDel), 1);
+      saveMeta({ attachments: list });
+      draw();
+    }));
+    const add = () => {
+      const name = body.querySelector('#att-name').value.trim();
+      const link = body.querySelector('#att-url').value.trim();
+      const msg = body.querySelector('#att-msg');
+      if (!isWebUrl(link)) { msg.textContent = 'https:// 로 시작하는 공유 링크를 넣어 주세요.'; return; }
+      saveMeta({ attachments: [...(n.attachments || []), { name: name || hostLabel(link) || '자료', url: link }] });
+      draw();
+    };
+    body.querySelector('#att-add').onclick = add;
+    body.querySelector('#att-url').onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); add(); } };
+  };
+  await draw();
+  if (!dlg.open) dlg.showModal();
+}
+
+function showBigQR(src, url) {
+  const ov = document.createElement('div');
+  ov.className = 'qr-big';
+  ov.innerHTML = `<img src="${src}" alt="QR 코드" /><p>${esc(url)}</p><small>아무 곳이나 누르면 닫힘</small>`;
+  ov.onclick = () => ov.remove();
+  ($('#share-dlg').open ? $('#share-dlg') : document.body).appendChild(ov);
+}
 
 /* ───────── 인쇄·PDF ───────── */
 async function printNote() {

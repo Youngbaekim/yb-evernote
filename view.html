@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#ffffff" />
+  <meta name="robots" content="noindex" />
+  <link rel="icon" type="image/svg+xml" href="icons/icon.svg" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Gowun+Dodum&family=Nanum+Gothic:wght@400;700&family=Nanum+Myeongjo:wght@400;700&family=Nanum+Pen+Script&family=Noto+Sans+KR:wght@400;700&family=Noto+Serif+KR:wght@400;700&display=swap" />
+  <title>YB 노트</title>
+</head>
+<body class="viewer">
+  <header class="v-head">
+    <span class="v-name" id="v-name">YB 노트</span>
+    <span class="v-title" id="v-title"></span>
+    <span class="v-live" id="v-live" title="고치는 내용이 자동으로 반영됩니다">● 실시간</span>
+  </header>
+  <div class="editor-wrap v-wrap">
+    <section id="v-files" class="v-files" hidden>
+      <h2>자료 내려받기</h2>
+      <ul id="v-file-list"></ul>
+      <p class="v-files-hint">OneDrive 화면이 열리면 파일 이름을 누른 뒤, 왼쪽 위 ⤓(다운로드)를 누르세요.</p>
+    </section>
+    <div id="editor" class="editor" hidden></div>
+    <div id="v-msg" class="placeholder v-msg"><p class="ph-title">불러오는 중…</p></div>
+  </div>
+  <script type="module" src="/src/view.js"></script>
+</body>
+</html>

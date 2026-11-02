@@ -14,8 +14,13 @@ export const newId = local.newId;
 let uid = null;
 const unsubs = [];
 
-const col = (name) => collection(fs, 'users', uid, name);
-const ref = (name, id) => doc(fs, 'users', uid, name, id);
+// 보통은 users/{uid}/… · 공개 열람 화면(view.html)은 public/{공유ID}/… 를 읽기 전용으로 사용
+let base = null;
+const col = (name) => (base ? collection(fs, ...base, name) : collection(fs, 'users', uid, name));
+const ref = (name, id) => (base ? doc(fs, ...base, name, id) : doc(fs, 'users', uid, name, id));
+/** 열람 화면 전용: 읽을 위치를 공개 사본으로 바꿈 */
+export function useReadOnlyBase(shareId) { base = ['public', shareId]; }
+export const isReadOnly = () => !!base;
 /** Firestore는 undefined 값을 받지 않으므로 정리 */
 const clean = (o) => JSON.parse(JSON.stringify(o));
 const report = (what) => (err) => console.error(`[YB-EverNote] ${what} 실패`, err);
@@ -180,6 +185,8 @@ export async function putImage({ id, blob, ...meta }) {
   const bytes = Bytes.fromUint8Array(new Uint8Array(await blob.arrayBuffer()));
   const data = { ...clean(meta), data: bytes, createdAt: meta.createdAt ?? Date.now() };
   setDoc(ref('images', id), data).catch(report('그림 저장'));
+  const sid = shareOf(meta.noteId);
+  if (sid) setDoc(pubRef(sid, 'images', id), data).catch(report('게시 그림 반영'));
 }
 
 export async function getImage(id) {
@@ -207,13 +214,15 @@ export async function imageUsage() {
 export function putChunk(chunk) {
   const { id, ...rest } = chunk;
   setDoc(ref('chunks', id), clean(rest)).catch(report('필기 저장'));
+  const sid = shareOf(rest.noteId);
+  if (sid) setDoc(pubRef(sid, 'chunks', id), clean(rest)).catch(report('게시 필기 반영'));
   return chunk;
 }
 
 /** 필기 블록의 묶음 구독: 처음에는 전체, 이후 새로 생긴 묶음만 전달
  *  cb(added, { fromCache, docs }) — docs: 지금 있는 묶음 전체의 { id, createdAt } (묶음 정리에 사용) */
 export function subscribeChunks(drawingId, cb) {
-  if (!uid) return () => {};
+  if (!uid && !base) return () => {};
   return onSnapshot(
     query(col('chunks'), where('drawingId', '==', drawingId)),
     { includeMetadataChanges: true },
@@ -258,6 +267,14 @@ export function compactChunks({ drawingId, noteId, records, oldIds, createdAt, m
   });
   oldIds.forEach((id) => batch.delete(ref('chunks', id)));
   batch.commit().catch(report('필기 묶음 정리'));
+  // 게시 중인 노트면 공개 사본도 같이 정리
+  const sid = shareOf(noteId);
+  if (sid) {
+    const pb = writeBatch(fs);
+    parts.forEach((strokes, i) => pb.set(pubRef(sid, 'chunks', ids[i]), clean({ drawingId, noteId, device: 'compact', seq: 0, strokes, erased: [], createdAt })));
+    oldIds.forEach((id) => pb.delete(pubRef(sid, 'chunks', id)));
+    pb.commit().catch(report('게시 필기 정리'));
+  }
   return ids;
 }
 
@@ -355,4 +372,68 @@ export async function importAll(data) {
     if (!dataB64) continue;
     setDoc(ref('images', id), { ...clean(meta), data: Bytes.fromUint8Array(fromB64(dataB64)) }).catch(report('그림 복원'));
   }
+}
+
+/* ───────── 웹 게시 (공개 사본) ─────────
+   public/{공유ID}            : 제목·본문·바탕·자료 링크 (누구나 읽기, 쓰기는 게시한 사람만)
+   public/{공유ID}/images     : 노트 그림 사본
+   public/{공유ID}/chunks     : 필기 묶음 사본
+   원본(users/{uid})은 계속 본인만 접근 */
+const pubRef = (sid, name, id) => (name ? doc(fs, 'public', sid, name, id) : doc(fs, 'public', sid));
+const pubCol = (sid, name) => collection(fs, 'public', sid, name);
+let shareOf = () => null; // 노트 ID → 공유 ID (게시 중이 아니면 null)
+export function setShareResolver(fn) { shareOf = fn; }
+
+/** 본문·제목 등 공개 사본 갱신 */
+export function publishNote(sid, n) {
+  return setDoc(pubRef(sid), clean({
+    owner: uid,
+    noteId: n.id,
+    title: n.title || '',
+    contentJson: n.content ? JSON.stringify(n.content) : '',
+    background: n.background || 'lined',
+    bgColor: n.bgColor || '',
+    createdAt: n.createdAt || null,
+    attachments: n.attachments || [],
+    shareName: n.shareName || '',
+    publishedAt: Date.now(),
+  })).catch(report('웹 게시'));
+}
+
+/** 처음 게시할 때: 이 노트의 그림·필기를 모두 공개 사본으로 복사 */
+export async function copyNoteMedia(sid, noteId) {
+  for (const name of ['chunks', 'images']) {
+    let snap;
+    try { snap = await getDocs(query(col(name), where('noteId', '==', noteId))); } catch (err) { report(`${name} 조회`)(err); continue; }
+    const docs = snap.docs;
+    if (name === 'images') {
+      for (const d of docs) await setDoc(pubRef(sid, name, d.id), d.data()).catch(report('게시 그림 복사'));
+    } else {
+      for (let i = 0; i < docs.length; i += 400) {
+        const b = writeBatch(fs);
+        docs.slice(i, i + 400).forEach((d) => b.set(pubRef(sid, name, d.id), d.data()));
+        await b.commit().catch(report('게시 필기 복사'));
+      }
+    }
+  }
+}
+
+/** 게시 중지: 공개 사본 전체 삭제 */
+export async function unpublish(sid) {
+  for (const name of ['chunks', 'images']) {
+    try {
+      const snap = await getDocs(pubCol(sid, name));
+      for (let i = 0; i < snap.docs.length; i += 400) {
+        const b = writeBatch(fs);
+        snap.docs.slice(i, i + 400).forEach((d) => b.delete(d.ref));
+        await b.commit();
+      }
+    } catch (err) { report('게시 사본 삭제')(err); }
+  }
+  await deleteDoc(pubRef(sid)).catch(report('게시 중지'));
+}
+
+/** 열람 화면: 공개 사본 구독 */
+export function watchPublic(sid, cb) {
+  return onSnapshot(pubRef(sid), (d) => cb(d.exists() ? d.data() : null), (err) => { report('게시 노트 읽기')(err); cb(null); });
 }

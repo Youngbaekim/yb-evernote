@@ -17,5 +17,19 @@ service cloud.firestore {
     match /users/{uid}/{document=**} {
       allow read, write: if allowed() && request.auth.uid == uid;
     }
+    // 웹에 게시한 노트의 공개 사본 (v0.8.0)
+    // - 주소(공유 ID)를 아는 사람은 로그인 없이 읽기만 가능, 목록 조회(전체 게시물 훑기)는 막음
+    // - 쓰기는 게시한 본인만
+    match /public/{shareId} {
+      allow get: if true;
+      allow list: if false;
+      allow create: if allowed() && request.resource.data.owner == request.auth.uid;
+      allow update: if allowed() && resource.data.owner == request.auth.uid && request.resource.data.owner == request.auth.uid;
+      allow delete: if allowed() && resource.data.owner == request.auth.uid;
+      match /{sub=**} {
+        allow read: if true;
+        allow write: if allowed() && get(/databases/$(database)/documents/public/$(shareId)).data.owner == request.auth.uid;
+      }
+    }
   }
 }
