@@ -11,7 +11,7 @@ import { DEVICE_ID } from './device.js';
 import QRCode from 'qrcode';
 import { newShareId, isWebUrl, hostLabel, normCode, CODE_RE } from './share-utils.js';
 
-const VERSION = 'v0.8.7 · 8단계';
+const VERSION = 'v0.8.8 · 8단계';
 const $ = (sel) => document.querySelector(sel);
 const app = $('#app');
 
@@ -216,9 +216,13 @@ const noteUrl = (note) => { const u = new URL(location.href); u.search = ''; u.h
 async function openNote(id) {
   await flushAllDrawings();
   await flushSave();
+  const switched = state.noteId !== id; // 다른 노트로 바꿀 때는 맨 위부터 보이도록
   state.noteId = id;
   const note = current();
   syncUrl(note);
+  const wrap = $('.editor-wrap');
+  const toTop = () => { if (switched && wrap) { wrap.scrollTop = 0; wrap.scrollLeft = 0; } };
+  toTop();
   app.dataset.view = id ? 'editor' : 'list';
   renderList();
   renderEditorHeader();
@@ -241,6 +245,8 @@ async function openNote(id) {
   const content = await hydrateJSON(note.content);
   editor.commands.setContent(content || '', { emitUpdate: false });
   editor.setEditable(!note.trashedAt, false); // false: 여는 것만으로는 '수정됨'으로 저장하지 않음
+  toTop();
+  requestAnimationFrame(toTop); // 그림·필기가 자리를 잡은 뒤 한 번 더
   setSearchTerm(editor, state.search.trim());
   setSaveState('');
   updateToolbar();
