@@ -17,6 +17,20 @@ service cloud.firestore {
     match /users/{uid}/{document=**} {
       allow read, write: if allowed() && request.auth.uid == uid;
     }
+    // YB Family Food Diary (2026.11) — 가족 공용 식사 일기
+    // - 허용 목록 가족은 모두 읽기 가능
+    // - 문서 ID가 '날짜_끼니'라서 같은 끼니는 1건만, 남이 올린 끼니는 덮어쓸 수 없음
+    // - 수정·삭제는 올린 사람(owner)만
+    match /family/{fam}/{kind}/{id} {
+      allow read: if allowed() && kind in ['meals', 'mealImages'];
+      allow create: if allowed() && kind in ['meals', 'mealImages']
+        && request.resource.data.owner == request.auth.uid;
+      allow update: if allowed() && kind in ['meals', 'mealImages']
+        && resource.data.owner == request.auth.uid
+        && request.resource.data.owner == request.auth.uid;
+      allow delete: if allowed() && kind in ['meals', 'mealImages']
+        && (resource == null || resource.data.owner == request.auth.uid);
+    }
     // 웹에 게시한 노트의 공개 사본 (v0.8.0)
     // - 주소(공유 ID)를 아는 사람은 로그인 없이 읽기만 가능, 목록 조회(전체 게시물 훑기)는 막음
     // - 쓰기는 게시한 본인만
