@@ -3,7 +3,8 @@ import './style.css';
 import { getTheme, setTheme } from './theme.js';
 import { useReadOnlyBase, watchPublic } from './store.js';
 import { createEditor, hydrateJSON } from './editor.js';
-import { downloadUrl, hostLabel, stripTags, CODE_RE } from './share-utils.js';
+import { downloadUrl, hostLabel, stripTags, CODE_RE, sanitizeHtml } from './share-utils.js';
+import { createHtmlView } from './htmlnote.js';
 
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -14,8 +15,10 @@ themeSel.onchange = () => setTheme(themeSel.value);
 
 const sid = (new URLSearchParams(location.search).get('s') || '').toLowerCase();
 
+let htmlView = null;
 function message(title, sub = '') {
   $('#editor').hidden = true;
+  htmlView?.hide();
   $('#v-files').hidden = true;
   $('#v-live').hidden = true;
   $('#v-msg').hidden = false;
@@ -44,6 +47,21 @@ if (!CODE_RE.test(sid)) {
     $('#v-file-list').innerHTML = files
       .map((a) => `<li><span class="vf-name">${esc(a.name)}</span><span class="vf-host">${esc(hostLabel(a.url))}</span><a class="btn-primary vf-btn" href="${esc(downloadUrl(a.url))}" target="_blank" rel="noopener">내려받기</a></li>`)
       .join('');
+    // HTML 노트: 원본 문서를 그대로 (스크립트 없이, 읽기 전용)
+    if (d.type === 'html') {
+      htmlView ??= createHtmlView($('.v-wrap'), { readOnly: true });
+      $('#editor').hidden = true;
+      const wrap = $('.v-wrap');
+      const top = wrap.scrollTop;
+      const before = htmlView.visible;
+      await htmlView.show(sanitizeHtml(d.html || ''));
+      if (my !== seq) return;
+      wrap.scrollTop = top;
+      if (before) flash();
+      $('#v-msg').hidden = true;
+      return;
+    }
+    htmlView?.hide();
     // 본문 (바뀐 경우에만 다시 그림, 읽던 위치 유지)
     const ed = $('#editor');
     ed.dataset.bg = d.background || 'lined';

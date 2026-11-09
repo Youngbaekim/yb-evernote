@@ -746,3 +746,20 @@ body.viewer :is(.img-menu, .img-h, .ink-bar, .ink-hint) { display: none !importa
   .title-input { flex: 1 0 calc(100% - 84px); }
   .sel-move { flex: 1 1 0; max-width: none; min-width: 0; }
 }
+
+/* ───────── HTML 노트 (v0.9.0) ───────── */
+.html-frame { display: block; width: 100%; min-height: 60vh; border: 0; background: #fff; }
+.html-frame[hidden] { display: none; }
+.html-frame.editing { outline: 3px solid #f0b429; outline-offset: -3px; }
+.html-bar .hb-label { flex: none; font-size: 12px; font-weight: 700; color: var(--accent); padding: 2px 8px; border: 1px solid var(--accent); border-radius: 999px; margin-right: 4px; }
+.html-bar .hb-edit { width: auto; padding: 0 10px; font-weight: 700; color: var(--accent); }
+.html-bar .hb-edit.on { background: #f0b429; color: #222; }
+.html-bar .tool:disabled { opacity: .35; }
+.html-bar .hx-hl { background: #fff176; color: #222; padding: 0 2px; }
+.html-bar[hidden] { display: none; }
+#toolbar[hidden] { display: none; }
+.drop-file { outline: 3px dashed var(--accent); outline-offset: -6px; }
+#ctx-menu small { color: var(--soft); font-weight: 400; }
+body.viewer .html-frame { min-height: 0; }
+body.viewer .v-files + .editor + .v-msg + .html-frame, body.viewer .v-files ~ .html-frame { margin-top: 14px; }
+.app[data-notetype='html'] :is(#sel-bg, #zoom-group) { display: none !important; }

@@ -37,6 +37,8 @@
         <select id="sel-tag" class="sel-move sel-tag" title="해시태그로 노트 골라 보기 (제목에 #단어)"></select>
         <button class="btn-ghost" id="btn-new-folder" title="지금 보고 있는 폴더 안에 하위 폴더 만들기" hidden>＋ 폴더</button>
         <button class="btn-ghost danger-ghost" id="btn-empty-trash" title="휴지통의 노트를 모두 영구 삭제" hidden>휴지통 비우기</button>
+        <button class="icon-btn" id="btn-import-html" title="HTML 파일 가져오기 (노트 목록이나 노트 화면에 끌어 놓아도 됨)">⇪</button>
+        <input id="file-html" type="file" accept=".html,.htm,text/html" multiple hidden />
         <button class="btn-primary" id="btn-new">＋ 새 노트</button>
       </header>
       <div class="search-box">
@@ -66,9 +68,10 @@
           <button class="icon-btn desk-act" id="btn-share" title="웹에 게시 (실시간 공유)" disabled>🌐</button>
           <button class="icon-btn desk-act" id="btn-lock" title="이 노트 잠그기" disabled>🔓</button>
           <button class="icon-btn desk-act" id="btn-history" title="이전 버전 보기·복원" disabled>🕘</button>
+          <button class="icon-btn desk-act" id="btn-export" title="내보내기 (PDF · HTML)" disabled>⤓</button>
           <button class="icon-btn desk-act" id="btn-print" title="인쇄 · PDF로 저장" disabled>🖨</button>
           <button class="icon-btn desk-act" id="btn-delete" title="휴지통으로" disabled>🗑</button>
-          <button class="icon-btn only-mobile" id="btn-more" title="더보기 (게시·잠금·이전 버전·인쇄·삭제)" disabled>⋯</button>
+          <button class="icon-btn only-mobile" id="btn-more" title="더보기 (복제·게시·내보내기·잠금·이전 버전·인쇄·삭제)" disabled>⋯</button>
         </div>
       </header>
       <div class="toolbar" id="toolbar" aria-label="도구 모음">
@@ -96,6 +99,24 @@
         <span class="sep"></span>
         <button class="tool" data-cmd="undo" title="실행 취소 (Ctrl+Z)">↶</button>
         <button class="tool" data-cmd="redo" title="다시 실행 (Ctrl+Y)">↷</button>
+      </div>
+      <div class="toolbar html-bar" id="html-bar" aria-label="HTML 노트 도구" hidden>
+        <span class="hb-label">HTML 노트</span>
+        <button class="tool hb-edit" id="hb-edit" title="문서 안 글자를 바로 고치기 (끝내면 자동 저장)">✎ 편집</button>
+        <span class="sep"></span>
+        <button class="tool" data-hx="bold" title="굵게 (Ctrl+B)"><b>B</b></button>
+        <button class="tool" data-hx="italic" title="기울임 (Ctrl+I)"><i>I</i></button>
+        <button class="tool" data-hx="underline" title="밑줄 (Ctrl+U)"><u>U</u></button>
+        <button class="tool" data-hx="strikeThrough" title="취소선"><s>S</s></button>
+        <span class="sep"></span>
+        <button class="tool hx-c" data-hx="foreColor:#c62828" title="빨강 글자" style="color:#c62828">가</button>
+        <button class="tool hx-c" data-hx="foreColor:#1f4ea8" title="파랑 글자" style="color:#1f4ea8">가</button>
+        <button class="tool hx-c" data-hx="foreColor:#222222" title="검정 글자" style="color:#222">가</button>
+        <button class="tool" data-hx="hiliteColor:#fff176" title="형광펜"><span class="hx-hl">가</span></button>
+        <button class="tool" data-hx="removeFormat" title="글자 서식 지우기">⌀</button>
+        <span class="sep"></span>
+        <button class="tool" data-hx="undo" title="실행 취소 (Ctrl+Z)">↶</button>
+        <button class="tool" data-hx="redo" title="다시 실행 (Ctrl+Y)">↷</button>
       </div>
       <div class="editor-wrap">
         <div id="editor" class="editor" hidden></div>

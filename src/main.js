@@ -9,9 +9,10 @@ import { newDrawingAttrs, flushAllDrawings, getDrawingView, resetZoom } from './
 import { makeSortable } from './sortable.js';
 import { DEVICE_ID } from './device.js';
 import QRCode from 'qrcode';
-import { newShareId, isWebUrl, hostLabel, normCode, CODE_RE } from './share-utils.js';
+import { newShareId, isWebUrl, hostLabel, normCode, CODE_RE, sanitizeHtml, htmlText, htmlTitle, byteSize } from './share-utils.js';
+import { createHtmlView } from './htmlnote.js';
 
-const VERSION = 'v0.8.9 · 8단계';
+const VERSION = 'v0.9.0 · 9단계';
 const $ = (sel) => document.querySelector(sel);
 const app = $('#app');
 
@@ -91,6 +92,11 @@ const editor = createEditor($('#editor'), {
   onInk: () => scheduleSave(true),
 });
 
+/* HTML 노트 보기·편집 화면 (일반 노트 편집기와 번갈아 표시) */
+const isHtml = (n) => n?.type === 'html';
+const HTML_MAX = 900 * 1024; // Firestore 문서 한 건 1MiB 안에서 여유
+const htmlView = createHtmlView($('.editor-wrap'), { onChange: () => scheduleSave() });
+
 function setSaveState(text) {
   $('#save-state').textContent = text;
 }
@@ -114,8 +120,21 @@ async function flushSave() {
   note.updatedBy = DEVICE_ID; // 다음 저장부터는 '이 기기에서 고친 노트'
   note.title = $('#note-title').value;
   note.tags = tagsOf(note.title);
-  note.content = toStorableJSON(editor.getJSON());
-  note.preview = editor.getText({ blockSeparator: '\n' }).trim().slice(0, 120);
+  if (isHtml(note)) {
+    if (htmlView.visible) {
+      const html = htmlView.serialize();
+      if (byteSize(html) > HTML_MAX) {
+        setSaveState('용량 초과 — 저장 안 됨');
+        alert('이 HTML 노트가 저장 가능한 크기(약 900KB)를 넘어 저장하지 못했습니다.\n문서 안의 큰 그림을 줄이거나 빼 주세요.');
+        return;
+      }
+      note.html = html;
+      note.preview = htmlText(html).slice(0, 120);
+    }
+  } else {
+    note.content = toStorableJSON(editor.getJSON());
+    note.preview = editor.getText({ blockSeparator: '\n' }).trim().slice(0, 120);
+  }
   note.updatedAt = Date.now();
   store.saveNote(note);
   schedulePublish(note);
@@ -128,13 +147,13 @@ async function flushSave() {
    저장하기 직전의 내용을 보관: ① 다른 기기에서 마지막으로 고친 노트를 이 기기에서 처음 고칠 때
    ② 같은 기기라도 마지막 보관 후 30분이 지났을 때 (노트마다 최근 20개) */
 const VERSION_GAP = 30 * 60 * 1000;
-const hasBody = (n) => !!((n.title || '').trim() || /"type":"(text|image|drawing)"/.test(JSON.stringify(n.content || {})));
+const hasBody = (n) => !!((n.title || '').trim() || n.html || /"type":"(text|image|drawing)"/.test(JSON.stringify(n.content || {})));
 function keepVersion(note) {
   const now = Date.now();
   const fromOther = !!note.updatedBy && note.updatedBy !== DEVICE_ID;
   if (!fromOther && note.verAt && now - note.verAt < VERSION_GAP) return;
   if (!hasBody(note)) return;
-  store.putVersion(note.id, { title: note.title, content: note.content }, fromOther ? 'other' : 'auto');
+  store.putVersion(note.id, { title: note.title, content: note.content, html: note.html }, fromOther ? 'other' : 'auto');
   note.verAt = now;
 }
 
@@ -163,7 +182,7 @@ async function openHistory() {
     return;
   }
   list.innerHTML = versions.map((v, i) => {
-    const text = plainText(v.content).join('').replace(/\s+/g, ' ').trim();
+    const text = (v.html ? htmlText(v.html) : plainText(v.content).join('')).replace(/\s+/g, ' ').trim();
     return `<li data-i="${i}">
       <div class="vh-meta"><b>${fmtTime(v.savedAt)}</b><span>${REASON[v.reason] || ''}${v.reason === 'other' ? '' : v.device === DEVICE_ID ? ' · 이 기기' : ' · 다른 기기'}</span></div>
       <div class="vh-prev">${esc(v.title || '(제목 없음)')} — ${esc(text.slice(0, 70)) || '(내용 없음)'}</div>
@@ -175,7 +194,7 @@ async function openHistory() {
     if (!b) return;
     const v = versions[Number(b.closest('li').dataset.i)];
     if (b.dataset.vh === 'view') {
-      const text = plainText(v.content).join('').replace(/\n{3,}/g, '\n\n').trim();
+      const text = (v.html ? htmlText(v.html) : plainText(v.content).join('')).replace(/\n{3,}/g, '\n\n').trim();
       view.innerHTML = `<div class="vh-meta"><b>${fmtTime(v.savedAt)}</b><button type="button" class="btn-text" data-vh-close>닫기</button></div><h4>${esc(v.title || '(제목 없음)')}</h4><pre>${esc(text) || '(내용 없음)'}</pre><p class="hint">글자만 미리 보여 줍니다. 그림·필기는 복원하면 함께 돌아옵니다.</p>`;
       view.hidden = false;
       view.querySelector('[data-vh-close]').onclick = () => { view.hidden = true; };
@@ -184,10 +203,10 @@ async function openHistory() {
     if (!confirm(`${fmtTime(v.savedAt)} 버전으로 되돌릴까요?\n지금 내용은 이전 버전 목록에 따로 보관됩니다.`)) return;
     const cur = current();
     if (!cur) return;
-    store.putVersion(cur.id, { title: cur.title, content: cur.content }, 'restore');
+    store.putVersion(cur.id, { title: cur.title, content: cur.content, html: cur.html }, 'restore');
     cur.title = v.title;
     cur.tags = tagsOf(v.title);
-    cur.content = v.content;
+    if (isHtml(cur)) { if (v.html) { cur.html = v.html; cur.preview = htmlText(v.html).slice(0, 120); } } else cur.content = v.content;
     cur.updatedAt = Date.now();
     cur.verAt = Date.now();
     store.saveNote(cur);
@@ -226,6 +245,9 @@ async function openNote(id) {
   app.dataset.view = id ? 'editor' : 'list';
   renderList();
   renderEditorHeader();
+  htmlView.setEditing(false);
+  renderHtmlBar();
+  if (!note || !isHtml(note) || (note.locked && !isUnlocked())) htmlView.hide();
   if (!note) {
     $('#editor').hidden = true;
     $('#empty-state').hidden = false;
@@ -240,8 +262,16 @@ async function openNote(id) {
     return;
   }
   $('#lock-gate')?.remove();
-  $('#editor').hidden = false;
   $('#empty-state').hidden = true;
+  if (isHtml(note)) {
+    $('#editor').hidden = true;
+    editor.commands.setContent('', { emitUpdate: false });
+    await htmlView.show(note.html);
+    toTop();
+    setSaveState('');
+    return;
+  }
+  $('#editor').hidden = false;
   const content = await hydrateJSON(note.content);
   editor.commands.setContent(content || '', { emitUpdate: false });
   editor.setEditable(!note.trashedAt, false); // false: 여는 것만으로는 '수정됨'으로 저장하지 않음
@@ -265,7 +295,7 @@ function plainText(node, out = []) {
 function fullText(n) {
   const hit = textCache.get(n.id);
   if (hit && hit.at === n.updatedAt) return hit.text;
-  const text = plainText(n.content).join('').replace(/\n{2,}/g, '\n').trim();
+  const text = isHtml(n) ? htmlText(n.html) : plainText(n.content).join('').replace(/\n{2,}/g, '\n').trim();
   textCache.set(n.id, { at: n.updatedAt, text });
   return text;
 }
@@ -672,13 +702,17 @@ function renderEditorHeader({ keepTitle = false } = {}) {
   $('#btn-history').disabled = !has || trashed || (note?.locked && !isUnlocked());
   $('#btn-delete').title = trashed ? '영구 삭제' : '휴지통으로';
   $('#sel-move').disabled = !has || trashed;
-  $('#sel-bg').disabled = !has || trashed;
+  $('#sel-bg').disabled = !has || trashed || isHtml(note);
+  $('#btn-export').disabled = !has || (note?.locked && !isUnlocked());
   renderBgSelect(note); // 배경을 정하지 않은 노트는 설정의 기본 배경
   $('#sel-move').innerHTML =
     `<option value="">미분류</option>` +
     folderTree().map(({ folder: f, depth }) => `<option value="${f.id}">${'\u3000'.repeat(depth)}${depth ? '└ ' : ''}${esc(f.name)}</option>`).join('');
   $('#sel-move').value = note?.folderId ?? '';
   $('#toolbar').classList.toggle('disabled', !has || trashed);
+  $('#toolbar').hidden = isHtml(note);
+  app.dataset.notetype = isHtml(note) ? 'html' : 'text'; // HTML 노트는 배경·배율 선택을 숨김
+  renderHtmlBar();
   $('#trash-banner')?.remove();
   if (trashed) {
     $('.editor-wrap').insertAdjacentHTML(
@@ -761,6 +795,15 @@ function runCmd(cmd) {
 async function reloadOpenNoteFromRemote() {
   const note = current();
   if (!note) return;
+  if (isHtml(note)) {
+    if (htmlView.isEditing() || (note.locked && !isUnlocked())) return; // 편집 중이면 덮어쓰지 않음
+    const w = $('.editor-wrap');
+    const top = w.scrollTop;
+    await htmlView.show(note.html);
+    w.scrollTop = top;
+    setSaveState('다른 기기에서 수정됨');
+    return;
+  }
   const content = await hydrateJSON(note.content);
   const { from } = editor.state.selection;
   editor.commands.setContent(content || '', { emitUpdate: false });
@@ -891,7 +934,7 @@ function folderMenu(id, anchor) {
 /** 휴대폰: 잠금·이전 버전·인쇄·삭제를 ⋯ 메뉴로 (PC·태블릿은 머리줄 단추 그대로) */
 function noteMenu(anchor) {
   const menu = $('#ctx-menu');
-  const items = ['#btn-copy', '#btn-share', '#btn-lock', '#btn-history', '#btn-print', '#btn-delete']
+  const items = ['#btn-copy', '#btn-share', '#btn-export', '#btn-lock', '#btn-history', '#btn-print', '#btn-delete']
     .map((id) => $(id))
     .filter((b) => !b.disabled)
     .map((b) => `<button data-nm="${b.id}" class="${b.id === 'btn-delete' ? 'danger' : ''}">${b.textContent} ${esc(b.title)}</button>`);
@@ -1147,7 +1190,7 @@ $('#settings').addEventListener('close', async () => {
 /* ───────── 이벤트 연결 ───────── */
 document.addEventListener('click', async (e) => {
   const t = e.target;
-  if (!t.closest('#ctx-menu') && !t.closest('[data-folder-menu]') && !t.closest('#btn-more')) $('#ctx-menu').hidden = true;
+  if (!t.closest('#ctx-menu') && !t.closest('[data-folder-menu]') && !t.closest('#btn-more') && !t.closest('#btn-export')) $('#ctx-menu').hidden = true;
   const caret = t.closest('[data-collapse]');
   if (caret) return toggleCollapse(caret.dataset.collapse);
   const folder = t.closest('[data-folder]');
@@ -1216,6 +1259,38 @@ $('#btn-more').addEventListener('click', (e) => { const m = $('#ctx-menu'); if (
 $('#btn-lock').addEventListener('click', toggleLock);
 $('#btn-share').addEventListener('click', openShare);
 $('#btn-copy').addEventListener('click', () => duplicateNote());
+// 노트 목록에서 노트를 고른 상태로 Delete 키 → 확인 후 휴지통 (확인 창은 Enter로 승인)
+document.addEventListener('keydown', async (e) => {
+  if (e.key !== 'Delete' || e.ctrlKey || e.altKey || e.metaKey) return;
+  const a = document.activeElement;
+  const card = a?.closest?.('.note-card');
+  const inList = card || a === document.body || a?.closest?.('.pane-list') && !a.matches('input, select, textarea');
+  if (!inList || a?.isContentEditable || a?.matches?.('input, textarea, select')) return;
+  const id = card?.dataset.note || state.noteId;
+  if (!id) return;
+  e.preventDefault();
+  if (id !== state.noteId) await openNote(id);
+  await deleteNote();
+});
+$('#btn-export').addEventListener('click', (e) => exportMenu(e.currentTarget));
+$('#btn-import-html').addEventListener('click', () => $('#file-html').click());
+$('#file-html').addEventListener('change', async (e) => {
+  const files = [...e.target.files];
+  e.target.value = '';
+  for (const f of files) await importHtmlFile(f);
+});
+// 노트 목록에 .html 파일을 끌어 놓아도 가져오기
+$('#note-list').addEventListener('dragover', (e) => {
+  if ([...(e.dataTransfer?.items || [])].some((i) => i.kind === 'file')) { e.preventDefault(); $('#note-list').classList.add('drop-file'); }
+});
+$('#note-list').addEventListener('dragleave', () => $('#note-list').classList.remove('drop-file'));
+$('#note-list').addEventListener('drop', async (e) => {
+  $('#note-list').classList.remove('drop-file');
+  const files = [...(e.dataTransfer?.files || [])].filter((f) => /\.html?$/i.test(f.name) || f.type === 'text/html');
+  if (!files.length) return;
+  e.preventDefault();
+  for (const f of files) await importHtmlFile(f);
+});
 $('#btn-print').addEventListener('click', printNote);
 $('#btn-history').addEventListener('click', openHistory);
 $('#btn-layout').addEventListener('click', cycleLayout);
@@ -1728,6 +1803,163 @@ function showBigQR(src, url, name) {
   ($('#share-dlg').open ? $('#share-dlg') : document.body).appendChild(ov);
 }
 
+/* ───────── HTML 노트: 가져오기·편집 도구·내보내기 (v0.9.0) ───────── */
+async function readHtmlFile(file) {
+  const raw = await file.text();
+  const html = sanitizeHtml(raw);
+  if (byteSize(html) > HTML_MAX) {
+    alert(`‘${file.name}’은(는) 저장 가능한 크기(약 900KB)를 넘습니다.\n문서 안에 넣은 그림을 줄이거나 빼고 다시 가져와 주세요.`);
+    return null;
+  }
+  const title = htmlTitle(html) || file.name.replace(/\.html?$/i, '');
+  return { html, title };
+}
+
+/** 새 HTML 노트로 가져오기 */
+async function importHtmlFile(file) {
+  const r = await readHtmlFile(file);
+  if (!r) return;
+  await flushSave();
+  const folderId = SYS_FILTERS.includes(state.filter) ? null : state.filter;
+  const now = Date.now();
+  const note = {
+    id: store.newId('note'),
+    type: 'html',
+    title: r.title,
+    html: r.html,
+    content: null,
+    preview: htmlText(r.html).slice(0, 120),
+    folderId,
+    fav: state.filter === 'fav',
+    trashedAt: null,
+    order: Math.min(0, ...state.notes.map(noteOrder)) - 1000,
+    createdAt: now,
+    updatedAt: now,
+  };
+  note.tags = tagsOf(note.title);
+  store.saveNote(note);
+  state.notes.unshift(note);
+  await openNote(note.id);
+  setSaveState('HTML 가져옴');
+}
+
+/** 비어 있는 노트인지 (제목은 있어도 본문이 없으면 빈 노트) */
+function isEmptyNote(n) {
+  if (!n || isHtml(n)) return false;
+  if (n.id === state.noteId && !$('#editor').hidden) return editor.isEmpty;
+  return !/"type":"(text|image|drawing)"/.test(JSON.stringify(n.content || {}));
+}
+
+/** 노트 화면에 HTML 파일을 끌어 놓았을 때
+ *  - 빈 노트: 그 노트를 HTML 노트로 (가져오기와 같음)
+ *  - 내용이 있는 노트: 새 노트로 열기 / 취소 */
+async function dropHtmlOnNote(file) {
+  const n = current();
+  if (!n || n.trashedAt) return importHtmlFile(file);
+  if (n.locked && !isUnlocked()) return;
+  if (!isEmptyNote(n)) {
+    if (!confirm(`이 노트에는 이미 내용이 있습니다.\n‘${file.name}’을(를) 새 노트로 열까요?\n\n[확인] 새 노트로 열기   [취소] 가져오지 않음`)) return;
+    return importHtmlFile(file);
+  }
+  const r = await readHtmlFile(file);
+  if (!r) return;
+  clearTimeout(saveTimer);
+  dirty = false;
+  const title = ($('#note-title').value || '').trim() || r.title;
+  n.type = 'html';
+  n.html = r.html;
+  n.content = null;
+  n.title = title;
+  n.tags = tagsOf(title);
+  n.preview = htmlText(r.html).slice(0, 120);
+  n.updatedAt = Date.now();
+  store.saveNote(n);
+  schedulePublish(n, true);
+  await openNote(null);
+  await openNote(n.id);
+  setSaveState('HTML 가져옴');
+}
+const htmlFileOf = (dt) => [...(dt?.files || [])].find((f) => /\.html?$/i.test(f.name) || f.type === 'text/html');
+const hasFileDrag = (dt) => [...(dt?.items || [])].some((i) => i.kind === 'file') || [...(dt?.types || [])].includes('Files');
+// 노트 화면(편집기·빈 화면)에 끌어 놓기 — 그림 끌어 놓기보다 먼저 가로챔 (HTML 파일일 때만)
+$('.pane-editor').addEventListener('dragover', (e) => {
+  if (hasFileDrag(e.dataTransfer)) $('.pane-editor').classList.add('drop-file');
+}, true);
+$('.pane-editor').addEventListener('dragleave', (e) => { if (!e.relatedTarget || !$('.pane-editor').contains(e.relatedTarget)) $('.pane-editor').classList.remove('drop-file'); }, true);
+$('.pane-editor').addEventListener('drop', async (e) => {
+  $('.pane-editor').classList.remove('drop-file');
+  const f = htmlFileOf(e.dataTransfer);
+  if (!f) return; // 그림 등은 원래대로
+  e.preventDefault();
+  e.stopPropagation();
+  await dropHtmlOnNote(f);
+}, true);
+// 끌어 놓을 자리 표시가 남지 않도록
+document.addEventListener('drop', () => document.querySelectorAll('.drop-file').forEach((x) => x.classList.remove('drop-file')));
+document.addEventListener('dragend', () => document.querySelectorAll('.drop-file').forEach((x) => x.classList.remove('drop-file')));
+
+/** HTML 노트 도구 모음 (일반 노트 도구 모음 대신 표시) */
+function renderHtmlBar() {
+  const n = current();
+  const bar = $('#html-bar');
+  const show = isHtml(n) && !(n.locked && !isUnlocked());
+  bar.hidden = !show;
+  if (!show) return;
+  const editing = htmlView.isEditing();
+  const btn = $('#hb-edit');
+  btn.textContent = editing ? '✓ 편집 끝내기' : '✎ 편집';
+  btn.classList.toggle('on', editing);
+  btn.disabled = !!n.trashedAt;
+  bar.classList.toggle('editing', editing);
+  bar.querySelectorAll('[data-hx]').forEach((b) => (b.disabled = !editing));
+}
+$('#hb-edit').addEventListener('click', async () => {
+  const on = !htmlView.isEditing();
+  if (!on) await flushSave();
+  htmlView.setEditing(on);
+  renderHtmlBar();
+  setSaveState(on ? '편집 중' : '저장됨');
+});
+$('#html-bar').addEventListener('mousedown', (e) => { if (e.target.closest('button')) e.preventDefault(); });
+$('#html-bar').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-hx]');
+  if (!b) return;
+  const [cmd, val] = b.dataset.hx.split(':');
+  if (cmd === 'removeFormat') { htmlView.exec('removeFormat'); return; }
+  htmlView.exec(cmd, val || null);
+});
+
+/** 내보내기: PDF(모든 노트) · HTML 파일(HTML 노트) */
+function exportMenu(anchor) {
+  const n = current();
+  if (!n) return;
+  const menu = $('#ctx-menu');
+  menu.innerHTML = `
+    <button data-ex="pdf">📄 PDF로 저장 <small>(인쇄 창에서 ‘PDF로 저장’)</small></button>
+    ${isHtml(n) ? '<button data-ex="html">🌐 HTML 파일로 저장</button>' : ''}`;
+  const r = anchor.getBoundingClientRect();
+  menu.hidden = false;
+  menu.style.left = `${Math.max(8, Math.min(r.right - 240, window.innerWidth - 248))}px`;
+  menu.style.top = `${r.bottom + 4}px`;
+  menu.onclick = (e) => {
+    const act = e.target.closest('[data-ex]')?.dataset.ex;
+    menu.hidden = true;
+    if (act === 'pdf') printNote();
+    if (act === 'html') exportHtml(n);
+  };
+}
+async function exportHtml(n) {
+  await flushSave();
+  const name = `${(stripTags(n.title) || 'YB 노트').replace(/[\\/:*?"<>|]/g, ' ').trim()}.html`;
+  const url = URL.createObjectURL(new Blob([n.html || ''], { type: 'text/html;charset=utf-8' }));
+  const a = Object.assign(document.createElement('a'), { href: url, download: name });
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+  setSaveState('HTML 저장됨');
+}
+
 /* ───────── 인쇄·PDF ───────── */
 async function printNote() {
   resetZoom(); // 확대한 필기는 원래 크기로 인쇄 (노트 배율은 인쇄용 스타일에서 100%)
@@ -1735,6 +1967,7 @@ async function printNote() {
   await flushSave();
   const n = current();
   if (!n) return;
+  if (isHtml(n)) return htmlView.print(); // HTML 노트는 문서 자체를 인쇄 (원본 쪽 구분 그대로)
   $('#print-title').textContent = stripTags(n.title) || titleOf(n);
   const prev = document.title;
   document.title = (stripTags(n.title) || 'YB-EverNote').replace(/[\\/:*?"<>|]/g, ' ');

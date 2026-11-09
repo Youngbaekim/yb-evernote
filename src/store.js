@@ -146,10 +146,10 @@ export async function purgeNote(id) {
 const KEEP_VERSIONS = 20; // 노트마다 최근 20개만 보관
 
 /** 지금 내용을 이전 버전으로 보관. reason: auto(일정 시간마다) · other(다른 기기 내용을 덮어쓰기 전) · restore(복원 직전) */
-export function putVersion(noteId, { title, content }, reason) {
+export function putVersion(noteId, { title, content, html }, reason) {
   const id = newId('ver');
   setDoc(ref('versions', id), clean({
-    noteId, title: title || '', contentJson: content ? JSON.stringify(content) : '',
+    noteId, title: title || '', contentJson: content ? JSON.stringify(content) : '', html: html || null,
     reason, device: DEVICE_ID, savedAt: Date.now(),
   })).catch(report('이전 버전 저장'));
   pruneVersions(noteId);
@@ -395,6 +395,8 @@ export function publishNote(sid, n) {
     bgColor: n.bgColor || '',
     createdAt: n.createdAt || null,
     attachments: (n.attachments || []).filter((a) => !a.hidden).map(({ name, url }) => ({ name, url })), // '게시'를 끈 자료는 공개 사본에 넣지 않음
+    type: n.type || 'text',
+    html: n.type === 'html' ? n.html || '' : null,
     shareName: n.shareName || '',
     publishedAt: Date.now(),
   })).catch(report('웹 게시'));
