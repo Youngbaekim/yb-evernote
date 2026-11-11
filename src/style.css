@@ -129,7 +129,7 @@ button:disabled { cursor: default; opacity: .4; }
 .note-content h2 { font-size: 1.3em; margin: .7em 0 .3em; line-height: 1.35; }
 .note-content ul, .note-content ol { padding-left: 1.4em; margin: .3em 0; }
 .note-content mark { border-radius: 2px; padding: 0 1px; color: #16202b !important; } /* 형광펜 위 글자는 화면 모드와 관계없이 진한색 */
-.note-content a { color: var(--accent); }
+.note-content a { color: var(--accent); cursor: pointer; }
 .note-content blockquote { border-left: 3px solid var(--line); margin: .5em 0; padding-left: 1em; color: var(--soft); }
 .note-content code { background: var(--accent-soft); border-radius: 4px; padding: 0 4px; font-size: .9em; }
 .note-content pre { background: var(--accent-soft); border-radius: 8px; padding: 10px 12px; overflow-x: auto; }

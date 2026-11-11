@@ -538,7 +538,20 @@ export function createEditor(element, { onUpdate, getNoteId, onInk }) {
     ],
     editorProps: {
       attributes: { class: 'note-content', spellcheck: 'false' },
-      handlePaste(view, event) {
+      // 링크: 누르면 바로 새 창(휴대폰 앱에서는 브라우저)으로 열기
+      // - Alt를 누른 채 클릭하면 열지 않고 그 자리에 커서 (링크 글자 고칠 때)
+      // - 끌어서 글자를 고르는 중이면 열지 않음
+      handleClick(view, pos, event) {
+        const a = event.target?.closest?.('a[href]');
+        if (!a || event.button !== 0 || event.altKey) return false;
+        if (!view.state.selection.empty) return false;
+        const href = a.getAttribute('href');
+        if (!/^(https?:|mailto:|tel:)/i.test(href)) return false;
+        event.preventDefault();
+        window.open(href, '_blank', 'noopener');
+        return true;
+      },
+            handlePaste(view, event) {
         const files = imageFiles(event.clipboardData?.files);
         if (!files.length) return false;
         event.preventDefault();
