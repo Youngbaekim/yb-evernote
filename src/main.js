@@ -12,7 +12,7 @@ import QRCode from 'qrcode';
 import { newShareId, isWebUrl, hostLabel, normCode, CODE_RE, sanitizeHtml, htmlText, htmlTitle, byteSize } from './share-utils.js';
 import { createHtmlView } from './htmlnote.js';
 
-const VERSION = 'v0.9.2 · 9단계';
+const VERSION = 'v0.9.3 · 9단계';
 const $ = (sel) => document.querySelector(sel);
 const app = $('#app');
 
@@ -107,8 +107,24 @@ function scheduleSave(force = false) {
   dirty = true;
   setSaveState('저장 중…');
   clearTimeout(saveTimer);
-  saveTimer = setTimeout(flushSave, 600);
+  saveTimer = setTimeout(autoFlush, 600);
 }
+/* 한글 등 조합 입력 중(자음·모음이 아직 한 글자로 합쳐지는 중)에는 자동 저장·화면 갱신을 미룸
+   — 안드로이드 키보드는 조합 중에 화면이 바뀌면 자모가 분리되어 입력될 수 있음 */
+const composing = () => !!editor.view.composing;
+function autoFlush() {
+  if (composing()) { saveTimer = setTimeout(autoFlush, 500); return; }
+  flushSave();
+}
+let deferredNotes = null;
+editor.view.dom.addEventListener('compositionend', () => {
+  setTimeout(() => {
+    if (composing() || !deferredNotes) return;
+    const [list, ids] = deferredNotes;
+    deferredNotes = null;
+    syncHandlers.onNotes(list, ids);
+  }, 50);
+});
 
 async function flushSave() {
   clearTimeout(saveTimer);
@@ -648,7 +664,8 @@ function renderCreated(note) {
   el.hidden = !note;
   if (!note) return;
   const ts = note.createdAt || note.updatedAt || Date.now();
-  el.textContent = fmtCreated(ts);
+  const txt = fmtCreated(ts);
+  if (el.textContent !== txt) el.textContent = txt; // 바뀔 때만 (편집 중 화면 갱신 최소화)
   el.disabled = !!note.trashedAt;
   el.title = note.trashedAt ? '만든 시간' : '만든 시간 — 눌러서 수정 (만든 날짜순 정렬에 반영)';
 }
@@ -822,6 +839,10 @@ const syncHandlers = {
     renderEditorHeader({ keepTitle: true });
   },
   onNotes(list, remoteIds) {
+    if (composing()) { // 조합 입력이 끝난 뒤 반영 (다른 기기 변경 표시가 사라지지 않도록 합쳐 둠)
+      deferredNotes = [list, [...new Set([...(deferredNotes?.[1] || []), ...remoteIds])]];
+      return;
+    }
     state.notes = list;
     state.ready = true;
     setTimeout(purgeExpired, 5000); // 앱을 열 때 한 번: 보관 기간이 지난 휴지통 노트 정리
@@ -1357,7 +1378,7 @@ $('#sel-size').addEventListener('change', (e) => {
 });
 $('#file-image').addEventListener('change', async (e) => {
   const all = [...e.target.files];
-  const docs = all.filter((f) => isPdfFile(f) || isHtmlFile(f));
+  const docs = all.filter((f) => !f.type.startsWith('image/')); // 그림이 아닌 것은 내용으로 확인 (PDF·HTML)
   editor.insertImageFiles(all.filter((f) => !docs.includes(f)));
   if (docs.length) { e.target.value = ''; await handleFiles(docs, 'note'); return; }
   e.target.value = '';
@@ -1811,6 +1832,10 @@ function showBigQR(src, url, name) {
 /* ───────── HTML 노트: 가져오기·편집 도구·내보내기 (v0.9.0) ───────── */
 async function readHtmlFile(file) {
   const raw = await file.text();
+  if (raw.startsWith('%PDF') || raw.slice(0, 4096).includes('\u0000')) { // HTML이 아닌 파일 (예: PDF)
+    alert(`‘${file.name}’은(는) HTML 파일이 아닙니다.`);
+    return null;
+  }
   const html = sanitizeHtml(raw);
   if (byteSize(html) > HTML_MAX) {
     alert(`‘${file.name}’은(는) 저장 가능한 크기(약 900KB)를 넘습니다.\n문서 안에 넣은 그림을 줄이거나 빼고 다시 가져와 주세요.`);
@@ -1896,7 +1921,7 @@ $('.pane-editor').addEventListener('dragover', (e) => {
 $('.pane-editor').addEventListener('dragleave', (e) => { if (!e.relatedTarget || !$('.pane-editor').contains(e.relatedTarget)) $('.pane-editor').classList.remove('drop-file'); }, true);
 $('.pane-editor').addEventListener('drop', async (e) => {
   $('.pane-editor').classList.remove('drop-file');
-  const files = [...(e.dataTransfer?.files || [])].filter((f) => isPdfFile(f) || isHtmlFile(f));
+  const files = [...(e.dataTransfer?.files || [])].filter((f) => isPdfFile(f) || isHtmlFile(f) || (!f.type && !/\.(png|jpe?g|gif|webp|heic|bmp)$/i.test(f.name)));
   if (!files.length) return; // 그림 등은 원래대로
   e.preventDefault();
   e.stopPropagation();
@@ -2049,10 +2074,22 @@ async function appendHtmlToNote(file) {
 }
 
 /** 여러 파일 한꺼번에: 순서대로 처리 */
+/** 파일 종류를 이름이 아니라 내용 앞부분으로 확인
+ *  (안드로이드 파일 선택기는 이름·형식 정보를 비워 보내는 경우가 있음) */
+async function sniffFile(f) {
+  let head = '';
+  try { head = await f.slice(0, 2048).text(); } catch { /* 무시 */ }
+  if (head.startsWith('%PDF')) return 'pdf';
+  if (head.includes('\u0000')) return isPdfFile(f) ? 'pdf' : 'other'; // 이진 파일
+  if (isHtmlFile(f) || /<!doctype html|<html[\s>]|<head[\s>]|<body[\s>]/i.test(head)) return 'html';
+  return isPdfFile(f) ? 'pdf' : 'other';
+}
 async function handleFiles(files, where) {
   for (const f of files) {
-    if (isPdfFile(f)) await addPdf(f, where === 'list' ? 'new' : 'auto');
-    else if (isHtmlFile(f)) await (where === 'list' ? importHtmlFile(f) : dropHtmlOnNote(f));
+    const kind = await sniffFile(f);
+    if (kind === 'pdf') await addPdf(f, where === 'list' ? 'new' : 'auto');
+    else if (kind === 'html') await (where === 'list' ? importHtmlFile(f) : dropHtmlOnNote(f));
+    else alert(`‘${f.name || '선택한 파일'}’은(는) PDF나 HTML 파일이 아니어서 가져오지 않았습니다.`);
   }
 }
 
