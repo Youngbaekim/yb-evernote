@@ -461,6 +461,34 @@ async function appendPdfFile(editor, file, getNoteId, { onProgress = () => {}, i
   return done;
 }
 
+/* ───────── 체크박스 줄: 한글 조합이 끊기지 않도록 (v0.9.5) ─────────
+   기본 체크박스는 글자를 칠 때마다 숨은 안내 문구(그 줄의 글자를 그대로 담음)를 다시 써서,
+   일부 안드로이드 키보드에서 조합 중인 한글이 자모로 분리됨.
+   → 안내 문구는 글자와 무관한 고정 문구로, 체크박스 영역의 화면 변화는 편집기가 무시하도록 */
+const SafeTaskItem = TaskItem.extend({
+  addNodeView() {
+    const make = this.parent?.();
+    return (props) => {
+      const nv = make(props);
+      // 글자만 바뀐 경우에는 체크박스 쪽을 다시 쓰지 않음 (체크 여부 등 속성이 바뀔 때만)
+      const baseUpdate = nv.update;
+      let lastAttrs = JSON.stringify(props.node.attrs);
+      nv.update = (node) => {
+        if (node.type !== props.node.type) return false;
+        const a = JSON.stringify(node.attrs);
+        if (a === lastAttrs) return true;
+        lastAttrs = a;
+        return baseUpdate(node);
+      };
+      nv.ignoreMutation = (m) => {
+        if (m.type === 'selection') return false;
+        return !nv.contentDOM.contains(m.target); // 체크박스·안내 문구·줄 자체의 속성 변화
+      };
+      return nv;
+    };
+  },
+});
+
 /** 그림 파일들을 압축·저장한 뒤 편집기에 삽입 */
 async function insertImages(editor, files, getNoteId, pos) {
   for (const file of files) {
@@ -500,7 +528,7 @@ export function createEditor(element, { onUpdate, getNoteId, onInk }) {
       Color,
       Highlight.configure({ multicolor: true }),
       TaskList,
-      TaskItem.configure({ nested: true }),
+      SafeTaskItem.configure({ nested: true, a11y: { checkboxLabel: (_node, checked) => (checked ? '완료한 할 일' : '할 일') } }),
       NoteImage.configure({ resize: false }),
       Drawing.configure({ getNoteId, onInk }),
       HtmlBlock,
