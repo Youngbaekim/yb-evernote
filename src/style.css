@@ -763,3 +763,30 @@ body.viewer :is(.img-menu, .img-h, .ink-bar, .ink-hint) { display: none !importa
 body.viewer .html-frame { min-height: 0; }
 body.viewer .v-files + .editor + .v-msg + .html-frame, body.viewer .v-files ~ .html-frame { margin-top: 14px; }
 .app[data-notetype='html'] :is(#sel-bg, #zoom-group) { display: none !important; }
+
+/* ───────── PDF 쪽 그림 · HTML 문서 칸 (v0.9.2) ───────── */
+/* PDF 쪽: 용지 왼쪽·오른쪽 가장자리까지 (노트 배율과 상관없이 용지 폭에 맞춤) */
+.editor[data-bg] .note-content .img-block.bleed, .editor .note-content .img-block.bleed { margin: 10px calc(-1 * var(--pad-x) / var(--z, 1)); }
+.note-content .img-block.bleed .img-wrap { display: block; width: 100% !important; }
+.note-content .img-block.bleed .img-wrap img, .note-content .img-block.bleed .img-clip { border-radius: 0; }
+.note-content .img-block.bleed .img-clip { box-shadow: 0 0 0 1px var(--sheet-line); }
+.note-content .img-block.bleed .img-h { display: none; }
+/* HTML 문서 칸 */
+.editor[data-bg] .note-content .html-block, .editor .note-content .html-block { position: relative; margin: 12px calc(-1 * var(--pad-x) / var(--z, 1)); border-top: 1px solid var(--sheet-line); border-bottom: 1px solid var(--sheet-line); line-height: normal; }
+.note-content .html-block .html-frame { min-height: 120px; }
+.note-content .html-block.selected { outline: 3px solid var(--accent); outline-offset: -3px; }
+.note-content .html-block.editing .html-frame { outline: 3px solid #f0b429; outline-offset: -3px; }
+.hblk-bar { position: absolute; top: 6px; right: 8px; z-index: 2; display: flex; align-items: center; gap: 6px; padding: 3px 4px 3px 10px; border-radius: 999px; background: rgba(255,255,255,.92); box-shadow: 0 1px 6px rgba(0,0,0,.15); font-size: 12px; color: #445; opacity: .35; transition: opacity .15s; }
+.html-block:hover .hblk-bar, .html-block.editing .hblk-bar, .html-block.selected .hblk-bar { opacity: 1; }
+.hblk-name { max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hblk-edit { padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 700; color: #243e6b; background: #e8eef8; }
+.hblk-edit.on { background: #f0b429; color: #222; }
+.ProseMirror[contenteditable='false'] .hblk-edit { display: none; }
+@media print { .hblk-bar { display: none !important; } }
+/* PDF 가져오는 중 */
+.pdf-progress { position: absolute; inset: 0; z-index: 30; display: grid; place-items: center; background: rgba(0,0,0,.25); }
+.pdf-progress[hidden] { display: none; }
+.pp-card { display: grid; gap: 10px; justify-items: center; min-width: 260px; padding: 20px 24px; border-radius: 14px; background: var(--pane); color: var(--ink); box-shadow: 0 10px 30px rgba(0,0,0,.25); }
+.pp-bar { width: 220px; height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
+.pp-bar i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .2s; }
+.pp-count { font-size: 13px; color: var(--soft); font-variant-numeric: tabular-nums; }

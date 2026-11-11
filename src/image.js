@@ -30,11 +30,12 @@ async function loadBitmap(file) {
  * @param {Blob} file 붙여넣거나 선택한 그림
  * @returns {Promise<{blob: Blob, width: number, height: number, mime: string}>}
  */
-export async function compressImage(file) {
-  const src = await loadBitmap(file);
+export async function compressImage(file, { maxSide = MAX_SIDE, maxBytes = MAX_BYTES } = {}) {
+  // 캔버스(PDF 쪽 그림 등)는 그대로, 파일은 그림으로 읽기
+  const src = typeof HTMLCanvasElement !== 'undefined' && file instanceof HTMLCanvasElement ? file : await loadBitmap(file);
   const w0 = src.width;
   const h0 = src.height;
-  const scale = Math.min(1, MAX_SIDE / Math.max(w0, h0));
+  const scale = Math.min(1, maxSide / Math.max(w0, h0));
   let w = Math.round(w0 * scale);
   let h = Math.round(h0 * scale);
 
@@ -58,9 +59,9 @@ export async function compressImage(file) {
   for (let round = 0; round < 3; round++) {
     for (const q of QUALITIES) {
       blob = await toBlob(canvas, type, q);
-      if (blob && blob.size <= MAX_BYTES) break;
+      if (blob && blob.size <= maxBytes) break;
     }
-    if (blob && blob.size <= MAX_BYTES) break;
+    if (blob && blob.size <= maxBytes) break;
     // 최저 화질로도 크면 크기를 줄여 다시 시도
     w = Math.round(w * 0.75);
     h = Math.round(h * 0.75);

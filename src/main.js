@@ -12,7 +12,7 @@ import QRCode from 'qrcode';
 import { newShareId, isWebUrl, hostLabel, normCode, CODE_RE, sanitizeHtml, htmlText, htmlTitle, byteSize } from './share-utils.js';
 import { createHtmlView } from './htmlnote.js';
 
-const VERSION = 'v0.9.1 · 9단계';
+const VERSION = 'v0.9.2 · 9단계';
 const $ = (sel) => document.querySelector(sel);
 const app = $('#app');
 
@@ -288,6 +288,8 @@ function plainText(node, out = []) {
   if (!node) return out;
   if (node.type === 'text') out.push(node.text);
   if (node.type === 'drawing') out.push(' ');
+  if (node.type === 'image' && node.attrs?.text) out.push(`\n${node.attrs.text}\n`); // PDF 쪽의 글자
+  if (node.type === 'htmlBlock' && node.attrs?.html) out.push(`\n${htmlText(node.attrs.html)}\n`);
   (node.content || []).forEach((c) => plainText(c, out));
   if (['paragraph', 'heading', 'listItem', 'taskItem'].includes(node.type)) out.push('\n');
   return out;
@@ -1277,7 +1279,7 @@ $('#btn-import-html').addEventListener('click', () => $('#file-html').click());
 $('#file-html').addEventListener('change', async (e) => {
   const files = [...e.target.files];
   e.target.value = '';
-  for (const f of files) await importHtmlFile(f);
+  await handleFiles(files, 'list'); // 목록의 ⇪: 항상 새 노트
 });
 // 노트 목록에 .html 파일을 끌어 놓아도 가져오기
 $('#note-list').addEventListener('dragover', (e) => {
@@ -1286,10 +1288,10 @@ $('#note-list').addEventListener('dragover', (e) => {
 $('#note-list').addEventListener('dragleave', () => $('#note-list').classList.remove('drop-file'));
 $('#note-list').addEventListener('drop', async (e) => {
   $('#note-list').classList.remove('drop-file');
-  const files = [...(e.dataTransfer?.files || [])].filter((f) => /\.html?$/i.test(f.name) || f.type === 'text/html');
+  const files = [...(e.dataTransfer?.files || [])].filter((f) => isPdfFile(f) || isHtmlFile(f));
   if (!files.length) return;
   e.preventDefault();
-  for (const f of files) await importHtmlFile(f);
+  await handleFiles(files, 'list');
 });
 $('#btn-print').addEventListener('click', printNote);
 $('#btn-history').addEventListener('click', openHistory);
@@ -1353,8 +1355,11 @@ $('#sel-size').addEventListener('change', (e) => {
   const c = editor.chain().focus();
   (v ? c.setFontSize(v) : c.unsetFontSize()).run();
 });
-$('#file-image').addEventListener('change', (e) => {
-  editor.insertImageFiles(e.target.files);
+$('#file-image').addEventListener('change', async (e) => {
+  const all = [...e.target.files];
+  const docs = all.filter((f) => isPdfFile(f) || isHtmlFile(f));
+  editor.insertImageFiles(all.filter((f) => !docs.includes(f)));
+  if (docs.length) { e.target.value = ''; await handleFiles(docs, 'note'); return; }
   e.target.value = '';
 });
 
@@ -1857,10 +1862,11 @@ async function dropHtmlOnNote(file) {
   const n = current();
   if (!n || n.trashedAt) return importHtmlFile(file);
   if (n.locked && !isUnlocked()) return;
-  if (!isEmptyNote(n)) {
-    if (!confirm(`이 노트에는 이미 내용이 있습니다.\n‘${file.name}’을(를) 새 노트로 열까요?\n\n[확인] 새 노트로 열기   [취소] 가져오지 않음`)) return;
+  if (isHtml(n)) {
+    if (!confirm(`HTML 노트에는 다른 문서를 덧붙일 수 없습니다.\n‘${file.name}’을(를) 새 노트로 열까요?\n\n[확인] 새 노트로 열기   [취소] 가져오지 않음`)) return;
     return importHtmlFile(file);
   }
+  if (!isEmptyNote(n)) return appendHtmlToNote(file); // 내용이 있으면 맨 아래에 HTML 문서 칸
   const r = await readHtmlFile(file);
   if (!r) return;
   clearTimeout(saveTimer);
@@ -1883,16 +1889,18 @@ const htmlFileOf = (dt) => [...(dt?.files || [])].find((f) => /\.html?$/i.test(f
 const hasFileDrag = (dt) => [...(dt?.items || [])].some((i) => i.kind === 'file') || [...(dt?.types || [])].includes('Files');
 // 노트 화면(편집기·빈 화면)에 끌어 놓기 — 그림 끌어 놓기보다 먼저 가로챔 (HTML 파일일 때만)
 $('.pane-editor').addEventListener('dragover', (e) => {
-  if (hasFileDrag(e.dataTransfer)) $('.pane-editor').classList.add('drop-file');
+  if (!hasFileDrag(e.dataTransfer)) return;
+  e.preventDefault(); // 빈 화면에도 놓을 수 있도록
+  $('.pane-editor').classList.add('drop-file');
 }, true);
 $('.pane-editor').addEventListener('dragleave', (e) => { if (!e.relatedTarget || !$('.pane-editor').contains(e.relatedTarget)) $('.pane-editor').classList.remove('drop-file'); }, true);
 $('.pane-editor').addEventListener('drop', async (e) => {
   $('.pane-editor').classList.remove('drop-file');
-  const f = htmlFileOf(e.dataTransfer);
-  if (!f) return; // 그림 등은 원래대로
+  const files = [...(e.dataTransfer?.files || [])].filter((f) => isPdfFile(f) || isHtmlFile(f));
+  if (!files.length) return; // 그림 등은 원래대로
   e.preventDefault();
   e.stopPropagation();
-  await dropHtmlOnNote(f);
+  await handleFiles(files, 'note');
 }, true);
 // 끌어 놓을 자리 표시가 남지 않도록
 document.addEventListener('drop', () => document.querySelectorAll('.drop-file').forEach((x) => x.classList.remove('drop-file')));
@@ -1958,6 +1966,94 @@ async function exportHtml(n) {
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 2000);
   setSaveState('HTML 저장됨');
+}
+
+/* ───────── PDF 가져오기 (v0.9.2) ─────────
+   - 새 노트·빈 노트: 첫 쪽부터 / 내용이 있는 노트: 맨 아래에 이어서
+   - 쪽마다 고화질 그림(용지 폭 전체) + 쪽의 글자는 검색용으로 함께 저장 */
+const isPdfFile = (f) => !!f && (f.type === 'application/pdf' || /\.pdf$/i.test(f.name || ''));
+const isHtmlFile = (f) => !!f && (/\.html?$/i.test(f.name || '') || f.type === 'text/html');
+const PDF_ASK_PAGES = 30;
+let pdfBusy = false;
+
+function pdfProgressUI() {
+  let box = $('#pdf-progress');
+  if (!box) {
+    box = document.createElement('div');
+    box.id = 'pdf-progress';
+    box.className = 'pdf-progress';
+    box.innerHTML = `<div class="pp-card"><b class="pp-title">PDF 가져오는 중…</b><div class="pp-bar"><i></i></div><span class="pp-count"></span><button type="button" class="btn-ghost pp-stop">그만두기</button></div>`;
+    $('.pane-editor').appendChild(box);
+  }
+  return box;
+}
+
+async function newNoteForFile(title) {
+  await newNote();
+  const n = current();
+  $('#note-title').value = title;
+  n.title = title;
+  n.tags = tagsOf(title);
+  store.updateFields('notes', n.id, { title, tags: n.tags });
+  renderList();
+  return n;
+}
+
+/** PDF를 노트에 넣기. target: 'auto'(드롭 규칙) | 'new'(항상 새 노트) */
+async function addPdf(file, target = 'auto') {
+  if (pdfBusy) return alert('다른 PDF를 가져오는 중입니다. 끝난 뒤 다시 시도해 주세요.');
+  const base = file.name.replace(/\.pdf$/i, '');
+  let n = current();
+  if (target === 'new' || !n || n.trashedAt || isHtml(n)) n = await newNoteForFile(base);
+  else if (n.locked && !isUnlocked()) return;
+  else {
+    await flushSave();
+    if (!($('#note-title').value || '').trim()) { $('#note-title').value = base; scheduleSave(); }
+  }
+  const startId = n.id;
+  pdfBusy = true;
+  let stop = false;
+  const ui = pdfProgressUI();
+  ui.hidden = false;
+  ui.querySelector('.pp-stop').onclick = () => { stop = true; ui.querySelector('.pp-title').textContent = '그만두는 중…'; };
+  ui.querySelector('.pp-title').textContent = `‘${file.name}’ 가져오는 중…`;
+  ui.querySelector('.pp-count').textContent = 'PDF 여는 중';
+  ui.querySelector('.pp-bar i').style.width = '0%';
+  try {
+    const done = await editor.appendPdfFile(file, {
+      isCancelled: () => stop || state.noteId !== startId,
+      confirmPages: (total) => total <= PDF_ASK_PAGES || confirm(`이 PDF는 ${total}쪽입니다.\n쪽마다 고화질 그림(쪽당 약 150~600KB)으로 저장되어 시간이 걸리고 저장 공간을 많이 씁니다.\n계속할까요?`),
+      onProgress: (i, total) => {
+        ui.querySelector('.pp-count').textContent = `${i} / ${total}쪽`;
+        ui.querySelector('.pp-bar i').style.width = `${Math.round(((i - 1) / total) * 100)}%`;
+        setSaveState(`PDF ${i}/${total}쪽`);
+      },
+    });
+    scheduleSave(true);
+    setSaveState(done ? `PDF ${done}쪽 가져옴` : '가져오지 않음');
+  } catch (err) {
+    console.error('[YB-EverNote] PDF 가져오기 실패', err);
+    alert(/password/i.test(err?.name || err?.message || '') ? '암호가 걸린 PDF는 가져올 수 없습니다.' : 'PDF를 읽지 못했습니다. 파일이 손상되었거나 지원하지 않는 형식일 수 있습니다.');
+    setSaveState('');
+  } finally {
+    pdfBusy = false;
+    ui.hidden = true;
+  }
+}
+
+/** 노트 화면에 HTML을 끌어 놓았을 때 (내용이 있는 일반 노트 → 맨 아래에 HTML 문서 칸) */
+async function appendHtmlToNote(file) {
+  const n = current();
+  if (n.locked && !isUnlocked()) return;
+  if (await editor.appendHtmlFile(file)) { scheduleSave(true); setSaveState('HTML 문서 칸 추가'); }
+}
+
+/** 여러 파일 한꺼번에: 순서대로 처리 */
+async function handleFiles(files, where) {
+  for (const f of files) {
+    if (isPdfFile(f)) await addPdf(f, where === 'list' ? 'new' : 'auto');
+    else if (isHtmlFile(f)) await (where === 'list' ? importHtmlFile(f) : dropHtmlOnNote(f));
+  }
 }
 
 /* ───────── 인쇄·PDF ───────── */

@@ -37,8 +37,8 @@
         <select id="sel-tag" class="sel-move sel-tag" title="해시태그로 노트 골라 보기 (제목에 #단어)"></select>
         <button class="btn-ghost" id="btn-new-folder" title="지금 보고 있는 폴더 안에 하위 폴더 만들기" hidden>＋ 폴더</button>
         <button class="btn-ghost danger-ghost" id="btn-empty-trash" title="휴지통의 노트를 모두 영구 삭제" hidden>휴지통 비우기</button>
-        <button class="icon-btn" id="btn-import-html" title="HTML 파일 가져오기 (노트 목록이나 노트 화면에 끌어 놓아도 됨)">⇪</button>
-        <input id="file-html" type="file" accept=".html,.htm,text/html" multiple hidden />
+        <button class="icon-btn" id="btn-import-html" title="PDF·HTML 파일을 새 노트로 가져오기 (노트 목록이나 노트 화면에 끌어 놓아도 됨)">⇪</button>
+        <input id="file-html" type="file" accept=".html,.htm,text/html,.pdf,application/pdf" multiple hidden />
         <button class="btn-primary" id="btn-new">＋ 새 노트</button>
       </header>
       <div class="search-box">
@@ -94,8 +94,8 @@
         <span id="hl-group" class="hl-group" title="형광펜"></span>
         <span class="sep"></span>
         <button class="tool" data-cmd="drawing" title="필기 넣기 (펜·손가락으로 쓰기)">✒</button>
-        <button class="tool" data-cmd="image" title="그림 넣기 (붙여넣기·끌어놓기도 가능)">🖼</button>
-        <input id="file-image" type="file" accept="image/*" multiple hidden />
+        <button class="tool" data-cmd="image" title="그림·PDF·HTML 넣기 (PDF·HTML은 노트 맨 아래에 붙음, 끌어 놓기도 가능)">🖼</button>
+        <input id="file-image" type="file" accept="image/*,.pdf,application/pdf,.html,.htm,text/html" multiple hidden />
         <span class="sep"></span>
         <button class="tool" data-cmd="undo" title="실행 취소 (Ctrl+Z)">↶</button>
         <button class="tool" data-cmd="redo" title="다시 실행 (Ctrl+Y)">↷</button>

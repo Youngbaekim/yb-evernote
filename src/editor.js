@@ -1,5 +1,5 @@
 // Tiptap 편집기 — 폰트·크기, 체크박스, 형광펜, 그림 붙여넣기
-import { Editor, Extension, textInputRule } from '@tiptap/core';
+import { Editor, Extension, Node, textInputRule } from '@tiptap/core';
 import { Plugin, PluginKey } from '@tiptap/pm/state';
 import { Decoration, DecorationSet } from '@tiptap/pm/view';
 import StarterKit from '@tiptap/starter-kit';
@@ -12,6 +12,8 @@ import { compressImage } from './image.js';
 import { Drawing, drawingFromImage, activateDrawing } from './drawing.js';
 import { openCropper, rotatedURL } from './crop.js';
 import { putImage, getImage, newId } from './store.js';
+import { createHtmlView } from './htmlnote.js';
+import { sanitizeHtml, byteSize } from './share-utils.js';
 
 export const FONTS = [
   { label: 'Pretendard', value: '' }, // 기본값
@@ -91,6 +93,7 @@ class ImageView {
     }
     const c = this.crop;
     this.dom.classList.toggle('edited', !!c || !!rotate);
+    this.dom.classList.toggle('bleed', !!this.node.attrs.bleed); // PDF 쪽: 용지 가장자리까지
     // 폭은 노트 폭을 넘지 않게, 비율은 aspect-ratio로 유지 (좁은 화면에서도 모양 그대로)
     this.wrap.style.width = width ? `${width}px` : '';
     this.clip.style.aspectRatio = width && height ? `${width} / ${height}` : '';
@@ -236,6 +239,9 @@ const NoteImage = Image.extend({
         parseHTML: (el) => el.getAttribute('data-image-id'),
         renderHTML: (attrs) => (attrs.imageId ? { 'data-image-id': attrs.imageId } : {}),
       },
+      // PDF 쪽 그림: 용지 폭 전체로 표시, 쪽의 글자(검색용, 화면에는 넣지 않음)
+      bleed: { default: null, parseHTML: (el) => (el.hasAttribute('data-bleed') ? true : null), renderHTML: (a) => (a.bleed ? { 'data-bleed': '' } : {}) },
+      text: { default: null, parseHTML: () => null, renderHTML: () => ({}) },
     };
   },
 });
@@ -321,6 +327,137 @@ export function setSearchTerm(editor, term) {
   if (term) requestAnimationFrame(() => editor.view.dom.querySelector('.search-hit')?.scrollIntoView({ block: 'center' }));
 }
 
+
+/* ───────── HTML 문서 칸 (일반 노트 안에 HTML 파일을 그대로 넣기, v0.9.2) ─────────
+   원본 모양 그대로 표시, ✎ 편집으로 칸 안의 글자 수정 → 노트에 함께 저장 */
+export const HTML_BLOCK_MAX = 600 * 1024;
+class HtmlBlockView {
+  constructor({ node, editor, getPos }) {
+    this.node = node;
+    this.editor = editor;
+    this.getPos = getPos;
+    const dom = document.createElement('div');
+    dom.className = 'html-block';
+    dom.contentEditable = 'false';
+    dom.innerHTML = `<div class="hblk-bar"><span class="hblk-name"></span><button type="button" class="hblk-edit">✎ 편집</button></div>`;
+    this.dom = dom;
+    this.name = dom.querySelector('.hblk-name');
+    this.btn = dom.querySelector('.hblk-edit');
+    this.view = createHtmlView(dom, { onChange: () => this.changed() });
+    this.btn.addEventListener('click', () => this.toggle());
+    this.render();
+  }
+  render() {
+    this.name.textContent = `HTML · ${this.node.attrs.name || '문서'}`;
+    this.view.show(this.node.attrs.html || '');
+  }
+  toggle() {
+    if (!this.editor.isEditable) return;
+    const on = !this.view.isEditing();
+    if (!on) this.commit();
+    this.view.setEditing(on);
+    this.btn.textContent = on ? '✓ 편집 끝내기' : '✎ 편집';
+    this.btn.classList.toggle('on', on);
+    this.dom.classList.toggle('editing', on);
+  }
+  changed() {
+    clearTimeout(this.t);
+    this.t = setTimeout(() => this.commit(), 800);
+  }
+  commit() {
+    clearTimeout(this.t);
+    if (!this.view.isDirty()) return;
+    const html = this.view.serialize();
+    const pos = this.getPos();
+    if (typeof pos !== 'number') return;
+    this.editor.view.dispatch(this.editor.state.tr.setNodeMarkup(pos, undefined, { ...this.node.attrs, html }));
+  }
+  update(node) {
+    if (node.type !== this.node.type) return false;
+    this.node = node;
+    this.render();
+    return true;
+  }
+  selectNode() { this.dom.classList.add('selected'); }
+  deselectNode() { this.dom.classList.remove('selected'); }
+  stopEvent() { return true; }
+  ignoreMutation() { return true; }
+  destroy() { this.commit(); }
+}
+export const HtmlBlock = Node.create({
+  name: 'htmlBlock',
+  group: 'block',
+  atom: true,
+  selectable: true,
+  draggable: false,
+  addAttributes() {
+    return {
+      html: { default: '', parseHTML: () => '', renderHTML: () => ({}) },
+      name: { default: '', parseHTML: (el) => el.getAttribute('data-name') || '', renderHTML: (a) => ({ 'data-name': a.name || '' }) },
+    };
+  },
+  parseHTML() { return [{ tag: 'div[data-html-block]' }]; },
+  renderHTML({ HTMLAttributes }) { return ['div', { 'data-html-block': '', ...HTMLAttributes }]; },
+  addNodeView() { return (props) => new HtmlBlockView(props); },
+});
+
+/** 노트 맨 아래(빈 노트면 처음부터)에 붙이기 — 끝에는 이어 쓸 빈 줄 */
+function appendNodes(editor, nodes) {
+  if (editor.isEmpty) editor.commands.clearContent();
+  ensureTrailingParagraph(editor);
+  // 맨 끝의 빈 줄 바로 앞에 넣기 (쪽 사이에 빈 줄이 생기지 않도록)
+  const doc = editor.state.doc;
+  const pos = doc.content.size - doc.lastChild.nodeSize;
+  editor.chain().insertContentAt(pos, nodes).run();
+}
+function ensureTrailingParagraph(editor) {
+  const last = editor.state.doc.lastChild;
+  if (last && last.type.name === 'paragraph' && !last.content.size) return;
+  editor.chain().insertContentAt(editor.state.doc.content.size, { type: 'paragraph' }).run();
+}
+
+/** HTML 파일을 노트 맨 아래에 문서 칸으로 */
+async function appendHtmlFile(editor, file) {
+  const html = sanitizeHtml(await file.text());
+  if (byteSize(html) > HTML_BLOCK_MAX) {
+    alert(`‘${file.name}’은(는) 노트 안에 넣기에는 큽니다(약 600KB 초과).\n문서 안의 그림을 줄이거나, 새 노트(HTML 노트)로 가져와 주세요.`);
+    return false;
+  }
+  appendNodes(editor, { type: 'htmlBlock', attrs: { html, name: file.name } });
+  ensureTrailingParagraph(editor);
+  return true;
+}
+
+/** PDF를 쪽마다 고화질 그림으로 노트 맨 아래에 (용지 폭 전체, 쪽 글자는 검색용으로 함께)
+ *  onProgress(i, n), isCancelled() → 중간에 그만두기 */
+async function appendPdfFile(editor, file, getNoteId, { onProgress = () => {}, isCancelled = () => false, confirmPages } = {}) {
+  const { openPdf, PDF_SIDE } = await import('./pdf.js');
+  const pdf = await openPdf(file);
+  const n = pdf.numPages;
+  if (confirmPages && !confirmPages(n)) { pdf.close(); return 0; }
+  const noteId = getNoteId();
+  let done = 0;
+  try {
+    for (let i = 1; i <= n; i++) {
+      if (isCancelled()) break;
+      onProgress(i, n);
+      const { canvas, text } = await pdf.page(i);
+      const { blob, width, height, mime } = await compressImage(canvas, { maxSide: PDF_SIDE });
+      canvas.width = canvas.height = 0; // 메모리 바로 돌려주기
+      const id = newId('img');
+      await putImage({ id, noteId, blob, width, height, mime, size: blob.size, createdAt: Date.now() });
+      const url = URL.createObjectURL(blob);
+      urlCache.set(id, url);
+      appendNodes(editor, { type: 'image', attrs: { src: url, imageId: id, alt: `${file.name} ${i}쪽`, width, height, bleed: true, text: text || null } });
+      done++;
+    }
+  } finally {
+    pdf.close();
+    if (done) ensureTrailingParagraph(editor);
+  }
+  return done;
+}
+
 /** 그림 파일들을 압축·저장한 뒤 편집기에 삽입 */
 async function insertImages(editor, files, getNoteId, pos) {
   for (const file of files) {
@@ -363,6 +500,7 @@ export function createEditor(element, { onUpdate, getNoteId, onInk }) {
       TaskItem.configure({ nested: true }),
       NoteImage.configure({ resize: false }),
       Drawing.configure({ getNoteId, onInk }),
+      HtmlBlock,
       SearchHighlight,
       Arrows,
       Placeholder.configure({ placeholder: '내용을 입력하세요. 그림은 Ctrl+V로 붙여 넣을 수 있습니다.' }),
@@ -389,5 +527,7 @@ export function createEditor(element, { onUpdate, getNoteId, onInk }) {
   });
 
   editor.insertImageFiles = (files) => insertImages(editor, imageFiles(files), getNoteId);
+  editor.appendPdfFile = (file, opts) => appendPdfFile(editor, file, getNoteId, opts);
+  editor.appendHtmlFile = (file) => appendHtmlFile(editor, file);
   return editor;
 }
