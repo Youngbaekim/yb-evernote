@@ -311,7 +311,10 @@ const SearchHighlight = Extension.create({
         state: {
           init: () => DecorationSet.empty,
           apply(tr, old) {
-            if (tr.getMeta(searchKey) !== undefined || tr.docChanged) return buildHits(tr.doc, ext.storage.term);
+            if (tr.getMeta(searchKey) !== undefined) return buildHits(tr.doc, ext.storage.term);
+            // 글을 쓰는 동안에는 표시를 다시 만들지 않고 위치만 옮김
+            // (매 글자마다 표시를 새로 만들면 일부 안드로이드 키보드에서 한글 조합이 끊겨 자모가 분리됨)
+            if (tr.docChanged) return ext.storage.term ? old.map(tr.mapping, tr.doc) : DecorationSet.empty;
             return old;
           },
         },
