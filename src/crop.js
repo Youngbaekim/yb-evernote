@@ -30,12 +30,11 @@ export function rotatedURL(src, deg) {
 }
 
 const RATIOS = [
-  { key: 'keep', label: '현재 크기 유지' },
   { key: 'free', label: '자유' },
+  { key: 'orig', label: '원본 비율' },
   { key: '1:1', label: '1:1', r: 1 },
   { key: '4:3', label: '4:3', r: 4 / 3 },
   { key: '16:9', label: '16:9', r: 16 / 9 },
-  { key: 'orig', label: '원본 비율' },
 ];
 const HANDLES = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'];
 const MIN = 0.04; // 최소 4%
@@ -72,14 +71,13 @@ export function openCropper({ src, crop, rotate = 0, boxW, boxH }) {
     let f = crop ? { ...crop } : { x: 0, y: 0, w: 1, h: 1 };
     let rot = ((rotate % 360) + 360) % 360;
     let firstLoad = true;
-    let mode = 'keep';
+    let mode = 'free'; // 기본: 자유
     let natW = 1;
     let natH = 1;
 
     // 틀의 비율(원본 픽셀 기준 가로/세로). null = 자유
     const targetAspect = () => {
       if (mode === 'free') return null;
-      if (mode === 'keep') return boxW && boxH ? boxW / boxH : null;
       if (mode === 'orig') return natW / natH;
       return RATIOS.find((r) => r.key === mode).r;
     };
@@ -123,7 +121,7 @@ export function openCropper({ src, crop, rotate = 0, boxW, boxH }) {
       natW = img.naturalWidth || 1;
       natH = img.naturalHeight || 1;
       layoutStage();
-      if (firstLoad && !crop) fitToAspect(); // 처음 자를 때: 현재 그림 칸 비율의 가장 큰 틀
+      if (firstLoad && !crop) fitToAspect(); // 처음 자를 때: 고른 비율의 가장 큰 틀 (자유면 그림 전체)
       firstLoad = false;
       draw();
     };

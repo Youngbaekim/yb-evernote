@@ -115,7 +115,7 @@ class ImageView {
     if (!res) return;
     if (res.reset) return this.resetCrop(res.natAspect);
     const W = this.node.attrs.width || boxW;
-    const H = res.mode === 'keep' ? (this.node.attrs.height || boxH) : W / res.aspectPx;
+    const H = W / res.aspectPx; // 자른 범위의 비율 그대로
     const c = res.crop;
     this.setAttrs({
       rotate: res.rotate || 0,
