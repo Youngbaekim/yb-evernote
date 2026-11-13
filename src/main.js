@@ -12,7 +12,7 @@ import QRCode from 'qrcode';
 import { newShareId, isWebUrl, hostLabel, normCode, CODE_RE, sanitizeHtml, htmlText, htmlTitle, byteSize } from './share-utils.js';
 import { createHtmlView } from './htmlnote.js';
 
-const VERSION = 'v0.9.6 · 9단계';
+const VERSION = 'v0.9.7 · 9단계';
 const $ = (sel) => document.querySelector(sel);
 const app = $('#app');
 

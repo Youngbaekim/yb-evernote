@@ -448,8 +448,8 @@ body.is-dragging, body.is-dragging * { cursor: grabbing !important; }
 .ink-bold { color: var(--ink); }
 
 /* 그림: 크기 조절 손잡이 8곳 (모서리 = 비율 유지, 변 = 한 방향) */
-.note-content .img-block { margin: .4em 0; line-height: 0; }
-.editor[data-bg='lined'] .note-content .img-block, .editor[data-bg='grid'] .note-content .img-block { margin: var(--lh) 0; }
+.note-content .img-block { margin: 6px 0; line-height: 0; }
+.editor[data-bg='lined'] .note-content .img-block, .editor[data-bg='grid'] .note-content .img-block { margin: 6px 0; } /* 무지와 같은 간격 (v0.9.7) */
 .note-content .img-wrap { position: relative; display: inline-block; max-width: 100%; }
 .note-content .img-wrap img { display: block; width: 100%; height: auto; object-fit: fill; border-radius: 6px; }
 .note-content .img-block.selected .img-wrap img { outline: 3px solid var(--accent); outline-offset: 1px; }
