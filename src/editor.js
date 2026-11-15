@@ -1,11 +1,11 @@
 // Tiptap 편집기 — 폰트·크기, 체크박스, 형광펜, 그림 붙여넣기
-import { Editor, Extension, Node, textInputRule } from '@tiptap/core';
+import { Editor, Extension, Node, InputRule, textInputRule, wrappingInputRule } from '@tiptap/core';
 import { Plugin, PluginKey } from '@tiptap/pm/state';
 import { Decoration, DecorationSet } from '@tiptap/pm/view';
 import StarterKit from '@tiptap/starter-kit';
 import { TextStyle, FontFamily, FontSize, Color } from '@tiptap/extension-text-style';
 import Highlight from '@tiptap/extension-highlight';
-import { TaskList, TaskItem } from '@tiptap/extension-list';
+import { TaskList, TaskItem, BulletList } from '@tiptap/extension-list';
 import Image from '@tiptap/extension-image';
 import { Placeholder } from '@tiptap/extensions';
 import { compressImage } from './image.js';
@@ -461,6 +461,51 @@ async function appendPdfFile(editor, file, getNoteId, { onProgress = () => {}, i
   return done;
 }
 
+/* ───────── 글머리 목록 (v0.9.8) ─────────
+   - '* ' (또는 '+ '): 동그란 글머리(•), 들여쓰기 없음
+   - '- ' : '-' 모양 하위 목록, '•' 항목 안에서 치면 그 아래 단계로 (글자 한 칸만큼 들여씀)
+            일반 줄에서 치면 '-' 목록으로 시작. 목록 첫 항목처럼 아래 단계로 내릴 수 없으면 글자 그대로 둠 */
+const NoteBulletList = BulletList.extend({
+  addAttributes() {
+    return {
+      ...this.parent?.(),
+      marker: {
+        default: null,
+        parseHTML: (el) => el.getAttribute('data-marker'),
+        renderHTML: (a) => (a.marker ? { 'data-marker': a.marker } : {}),
+      },
+    };
+  },
+  addInputRules() {
+    const type = this.type;
+    return [
+      wrappingInputRule({ find: /^\s*([*+])\s$/, type, joinPredicate: (_m, node) => !node.attrs.marker }), // 바로 위 '-' 목록과 합치지 않음
+      new InputRule({
+        find: /^\s*-\s$/,
+        handler: ({ state, range, chain, can }) => {
+          const $from = state.doc.resolve(range.from);
+          let inItem = false;
+          for (let d = $from.depth; d > 0; d--) if ($from.node(d).type.name === 'listItem') { inItem = true; break; }
+          const markDash = ({ tr }) => {
+            const $p = tr.selection.$from;
+            for (let d = $p.depth; d > 0; d--) {
+              const n = $p.node(d);
+              if (n.type === type) { tr.setNodeMarkup($p.before(d), undefined, { ...n.attrs, marker: 'dash' }); break; }
+            }
+            return true;
+          };
+          if (inItem) {
+            if (!can().sinkListItem('listItem')) return null; // 아래 단계로 내릴 수 없으면 '- ' 글자 그대로
+            chain().deleteRange(range).sinkListItem('listItem').command(markDash).run();
+            return;
+          }
+          chain().deleteRange(range).wrapIn(type, { marker: 'dash' }).run();
+        },
+      }),
+    ];
+  },
+});
+
 /* ───────── 체크박스 줄: 한글 조합이 끊기지 않도록 (v0.9.5) ─────────
    기본 체크박스는 글자를 칠 때마다 숨은 안내 문구(그 줄의 글자를 그대로 담음)를 다시 써서,
    일부 안드로이드 키보드에서 조합 중인 한글이 자모로 분리됨.
@@ -521,7 +566,8 @@ export function createEditor(element, { onUpdate, getNoteId, onInk }) {
   const editor = new Editor({
     element,
     extensions: [
-      StarterKit.configure({ link: { openOnClick: false, autolink: true } }),
+      StarterKit.configure({ link: { openOnClick: false, autolink: true }, bulletList: false }),
+      NoteBulletList,
       TextStyle,
       FontFamily,
       FontSize,
