@@ -12,7 +12,7 @@ import QRCode from 'qrcode';
 import { newShareId, isWebUrl, hostLabel, normCode, CODE_RE, sanitizeHtml, htmlText, htmlTitle, byteSize } from './share-utils.js';
 import { createHtmlView } from './htmlnote.js';
 
-const VERSION = 'v0.9.8 · 9단계';
+const VERSION = 'v0.9.9 · 9단계';
 const $ = (sel) => document.querySelector(sel);
 const app = $('#app');
 
@@ -242,10 +242,41 @@ function syncUrl(note) {
     const url = new URL(location.href);
     if (note) url.searchParams.set('note', note.id);
     else url.searchParams.delete('note');
-    if (url.href !== location.href) history.replaceState(null, '', url);
+    if (url.href !== location.href) history.replaceState(history.state, '', url); // 뒤로 가기용 표시는 유지
   } catch { /* 무시 */ }
   document.title = note ? `${titleOf(note)} - YB-EverNote` : 'YB-EverNote';
 }
+/* ───────── 휴대폰: 뒤로 가기 = 목록으로 (v0.9.9) ─────────
+   한 화면씩 보는 휴대폰에서 노트·폴더 화면을 열 때 기록을 한 칸 쌓아 두고,
+   기기의 뒤로 가기를 누르면 앱을 끄는 대신 목록으로 돌아옴 (목록에서 한 번 더 누르면 원래대로 종료) */
+const isOneCol = () => app.dataset.cols === 'm';
+let backGuard = false; // 앱이 직접 기록을 되돌리는 중
+new MutationObserver(() => {
+  const v = app.dataset.view;
+  const sub = history.state?.yb === 'sub';
+  if (v !== 'list' && isOneCol() && !sub) {
+    history.pushState({ ...(history.state || {}), yb: 'sub' }, '', location.href);
+  } else if (v === 'list' && sub && !backGuard) {
+    backGuard = true; // 화면 안 ‹ 단추 등으로 목록에 왔으면 쌓아 둔 기록도 정리
+    history.back();
+  }
+}).observe(app, { attributes: true, attributeFilter: ['data-view'] });
+window.addEventListener('popstate', async () => {
+  if (backGuard) { backGuard = false; return; }
+  const open = [...document.querySelectorAll('dialog[open]')];
+  if (open.length) { // 열린 창이 있으면 그것부터 닫기
+    open.forEach((d) => d.close());
+    if (app.dataset.view !== 'list' && isOneCol()) history.pushState({ ...(history.state || {}), yb: 'sub' }, '', location.href);
+    return;
+  }
+  if (!$('#ctx-menu').hidden) $('#ctx-menu').hidden = true;
+  if (app.dataset.view !== 'list') {
+    await flushAllDrawings();
+    await flushSave();
+    app.dataset.view = 'list';
+  }
+});
+
 const noteUrl = (note) => { const u = new URL(location.href); u.search = ''; u.hash = ''; u.searchParams.set('note', note.id); return u.href; };
 
 async function openNote(id) {
